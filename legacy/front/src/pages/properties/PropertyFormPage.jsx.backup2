@@ -1,0 +1,2034 @@
+﻿import React, { useState, useEffect } from 'react';
+import { propertyService } from '../../services/propertyService';
+import { holderService } from '../../services/holderService';
+import addressService from '../../services/common/addressService';
+import { loadAddressFromBjdCode } from '../../utils/addressUtils';
+import { useAuthStore } from '../../stores/authStore';
+import { useHubModalStore } from '../../stores/hubModalStore';
+import ConsultationHistoryPanel from '../../components/consultation/ConsultationHistoryPanel';
+import { toast } from 'react-hot-toast';
+import { X, FileText, Paperclip, MessageSquare } from 'lucide-react';
+import { PROPERTY_TYPES } from '../../constants/propertyTypes';
+
+const PropertyFormPage = ({ editData = null, onClose, onSuccess }) => {
+  const { user } = useAuthStore();
+  const { openWithProperty } = useHubModalStore();
+  const [activeTab, setActiveTab] = useState('property');
+  const [loading, setLoading] = useState(false);
+  const [expandedSections, setExpandedSections] = useState({
+    ownerInfo: false,
+    tenantInfo: false,
+  });
+  const [holders, setHolders] = useState([]);
+  const [currentHolder, setCurrentHolder] = useState({
+    holderRegDate: '',
+    holderName: '',
+    holderPhone: '',
+    custNo: '',
+    holderRelation: '',
+    holderMemo: '',
+  });
+  const [showHolderHistory, setShowHolderHistory] = useState(false);
+  const [editingHolderIdx, setEditingHolderIdx] = useState(null);
+  const [isCustomRelation, setIsCustomRelation] = useState(false);
+  const [holderDetailModal, setHolderDetailModal] = useState({ open: false, type: null, data: null });
+  const [sidoList, setSidoList] = useState([]);
+  const [sigunguList, setSigunguList] = useState([]);
+  const [eupMyeonDongList, setEupMyeonDongList] = useState([]);
+  const [danjiList, setDanjiList] = useState([]);
+  const [selectedSido, setSelectedSido] = useState('');
+  const [selectedSigungu, setSelectedSigungu] = useState('');
+  const [selectedEupMyeonDong, setSelectedEupMyeonDong] = useState('');
+  const [formData, setFormData] = useState({
+    ptName: '',
+    prgSts: 'PRGSTS01', // 진행상태
+    ptSts: [], // 물건상태 - 체크박스
+    ptType: 'apartment', // 물건유형
+    ptExpl: '',
+    saleDiv: [], // 거래구분 - 체크박스
+    addr1: '',
+    addr2: '',
+    addr3: '',
+    addr4: '',
+    addr5: '',
+    addrPost: '',
+    bjdCode: '',
+    danjiCode: '',
+    dong: '',
+    ho: '',
+    floor: '',
+    opt: '',
+    houseCnt: '',
+    aptTyp: '',
+    supArea: '',
+    excArea: '',
+    landShare: '',
+    roomCnt: '',
+    bathCnt: '',
+    dirStd: '',
+    heatMethod: '',
+    heatFuel: '',
+    entrStruct: '',
+    buidStruct: '',
+    balcExt: '',
+    floor1: '',
+    floor2: '',
+    pkCnt: '',
+    maintCost: '',
+    maintDtl: '',
+    saleAmt: '',
+    lesAmt: '',
+    protAmt: '',
+    monAmt: '',
+    etcAmt: '',
+    layAmt: '',
+    nowDepAmt: '',
+    nowMonAmt: '',
+    loanAmt: '',
+    loanAmtAft: '',
+    mtryDate: '',
+    exptMovDate: '',
+    exptDate: '',
+    exptComDate: '',
+    compYear: '',
+    shaYn: 'N',
+    custNo: '',
+    offNo: user?.offNo || '',
+    rtNo: user?.rtNo || '',
+    owner: '',
+    ownerTel: '',
+    ownerId: '',
+    buyer: '',
+    buyerTel: '',
+    buyerId: '',
+    cnNo: '',
+    cnDt: '',
+    cnType: '',
+    cnDoc: '',
+    cnVer: '',
+    tradeAmt: '',
+    cnAmtPart: '',
+    cnAmtPartDate: '',
+    cnAmt: '',
+    cnAmtDate: '',
+    midAmt: '',
+    midAmtDate: '',
+    rmdAmt: '',
+    rmdAmtDate: '',
+    spcCnDesc: '',
+    mvnPsbYn: 'N',
+    houseRental: 'N',
+    petYn: 'N',
+    top: '',
+    ptMemo: '',
+    userId: user?.userId || '',
+  });
+
+
+  const propertyStatuses = [
+    { value: 'PTSTS01', label: '진행중' },
+    { value: 'PTSTS02', label: '계약' },
+    { value: 'PTSTS03', label: '타계' },
+    { value: 'PTSTS04', label: '보류' },
+  ];
+
+  const tradeDivisions = [
+    { value: 'SALEDIV01', label: '매매' },
+    { value: 'SALEDIV02', label: '전세' },
+    { value: 'SALEDIV03', label: '월세' },
+    { value: 'SALEDIV04', label: '기타임대' },
+  ];
+
+  const tabs = [
+    { id: 'property', label: '기본정보', icon: FileText },
+    { id: 'detail', label: '상세정보', icon: MessageSquare },
+    { id: 'attachments', label: '첨부파일', icon: Paperclip },
+  ];
+
+  useEffect(() => {
+    loadSidoList();
+  }, []);
+
+  const loadSidoList = async () => {
+    try {
+      const data = await addressService.getSidoList();
+      setSidoList(data || []);
+    } catch (error) {
+      console.error('시도 목록 조회 실패:', error);
+      toast.error('시도 목록을 불러오지 못했습니다.');
+    }
+  };
+
+  const handleSidoChange = async (sidoCode) => {
+    setSelectedSido(sidoCode);
+    setSelectedSigungu('');
+    setSelectedEupMyeonDong('');
+    setSigunguList([]);
+    setEupMyeonDongList([]);
+    setDanjiList([]);
+
+    if (sidoCode) {
+      try {
+        const data = await addressService.getSigunguList(sidoCode);
+        setSigunguList(data || []);
+      } catch (error) {
+        console.error('시군구 목록 조회 실패:', error);
+        toast.error('시군구 목록을 불러오지 못했습니다.');
+      }
+    }
+  };
+
+  const handleSigunguChange = async (sigunguCode) => {
+    setSelectedSigungu(sigunguCode);
+    setSelectedEupMyeonDong('');
+    setEupMyeonDongList([]);
+    setDanjiList([]);
+
+    if (sigunguCode) {
+      try {
+        const data = await addressService.getEupMyeonDongList(sigunguCode);
+        setEupMyeonDongList(data || []);
+      } catch (error) {
+        console.error('읍면동 목록 조회 실패:', error);
+        toast.error('읍면동 목록을 불러오지 못했습니다.');
+      }
+    }
+  };
+
+  const handleEupMyeonDongChange = async (bjdCode, bjdName) => {
+    setSelectedEupMyeonDong(bjdCode);
+    handleChange('bjdCode', bjdCode);
+    handleChange('addr3', bjdName);
+
+    if (bjdCode) {
+      try {
+        const data = await addressService.getDanjiListByBjd(bjdCode);
+        setDanjiList(data || []);
+      } catch (error) {
+        console.error('단지 목록 조회 실패:', error);
+        toast.error('단지 목록을 불러오지 못했습니다.');
+      }
+    }
+  };
+
+  const handleDanjiChange = (buildingCode, buildingName) => {
+    handleChange('danjiCode', buildingCode);
+    handleChange('addr4', buildingName);
+  };
+
+  useEffect(() => {
+    const loadDetailData = async () => {
+      if (editData?.ptNo) {
+        try {
+          // 상세 조회 API 호출
+          const response = await propertyService.getDetail(editData.ptNo);
+          if (response?.data) {
+            const detailData = response.data;
+            setFormData({
+              ptName: '',
+              prgSts: 'PRGSTS01',
+              ptSts: [],
+              ptType: 'SYCA101',
+              ptExpl: '',
+              saleDiv: '',
+              addr1: '',
+              addr2: '',
+              addr3: '',
+              addr4: '',
+              addr5: '',
+              addrPost: '',
+              bjdCode: '',
+              danjiCode: '',
+              dong: '',
+              ho: '',
+              floor: '',
+              opt: '',
+              houseCnt: '',
+              aptTyp: '',
+              supArea: '',
+              excArea: '',
+              landShare: '',
+              roomCnt: '',
+              bathCnt: '',
+              dirStd: '',
+              heatMethod: '',
+              heatFuel: '',
+              entrStruct: '',
+              buidStruct: '',
+              balcExt: '',
+              floor1: '',
+              floor2: '',
+              pkCnt: '',
+              maintCost: '',
+              maintDtl: '',
+              saleAmt: '',
+              lesAmt: '',
+              protAmt: '',
+              monAmt: '',
+              etcAmt: '',
+              layAmt: '',
+              nowDepAmt: '',
+              nowMonAmt: '',
+              loanAmt: '',
+              loanAmtAft: '',
+              mtryDate: '',
+              exptMovDate: '',
+              exptDate: '',
+              exptComDate: '',
+              compYear: '',
+              shaYn: 'N',
+              custNo: '',
+              offNo: user?.offNo || '',
+              rtNo: user?.rtNo || '',
+              owner: '',
+              ownerTel: '',
+              ownerId: '',
+              buyer: '',
+              buyerTel: '',
+              buyerId: '',
+              cnNo: '',
+              cnDt: '',
+              cnType: '',
+              cnDoc: '',
+              cnVer: '',
+              tradeAmt: '',
+              cnAmtPart: '',
+              cnAmtPartDate: '',
+              cnAmt: '',
+              cnAmtDate: '',
+              midAmt: '',
+              midAmtDate: '',
+              rmdAmt: '',
+              rmdAmtDate: '',
+              spcCnDesc: '',
+              mvnPsbYn: 'N',
+              houseRental: 'N',
+              petYn: 'N',
+              top: '',
+              ptMemo: '',
+              userId: user?.userId || '',
+              regDt: '',
+              regId: '',
+              updDt: '',
+              updId: '',
+              ...detailData,
+              // null/undefined 체크 후 배열로 변환
+              ptSts: detailData.ptSts || [],
+              saleDiv: detailData.saleDiv || '',
+            });
+
+            // BjdCode로 주소 select 자동 설정
+            if (detailData.bjdCode) {
+              await loadAddressFromBjdCode(
+                detailData.bjdCode,
+                setSidoList,
+                setSigunguList,
+                setEupMyeonDongList,
+                setSelectedSido,
+                setSelectedSigungu,
+                setSelectedEupMyeonDong
+              );
+            }
+
+            // holders 데이터 설정 (API 응답에 이미 포함되어 있음)
+            if (detailData.holders && detailData.holders.length > 0) {
+              setHolders(detailData.holders);
+            }
+          }
+        } catch (error) {
+          console.error('상세 데이터 로드 실패:', error);
+        }
+      }
+    };
+
+    if (editData) {
+      loadDetailData();
+    } else {
+      // 초기화
+      setFormData({
+        ptName: '',
+        prgSts: 'PRGSTS01',
+        ptSts: [],
+        ptType: 'apartment',
+        ptExpl: '',
+        saleDiv: [],
+        addr1: '',
+        addr2: '',
+        addr3: '',
+        addr4: '',
+        addr5: '',
+        addrPost: '',
+        bjdCode: '',
+        danjiCode: '',
+        dong: '',
+        ho: '',
+        floor: '',
+        opt: '',
+        houseCnt: '',
+        aptTyp: '',
+        supArea: '',
+        excArea: '',
+        landShare: '',
+        roomCnt: '',
+        bathCnt: '',
+        dirStd: '',
+        heatMethod: '',
+        heatFuel: '',
+        entrStruct: '',
+        buidStruct: '',
+        balcExt: '',
+        floor1: '',
+        floor2: '',
+        pkCnt: '',
+        maintCost: '',
+        maintDtl: '',
+        saleAmt: '',
+        lesAmt: '',
+        protAmt: '',
+        monAmt: '',
+        etcAmt: '',
+        layAmt: '',
+        nowDepAmt: '',
+        nowMonAmt: '',
+        loanAmt: '',
+        loanAmtAft: '',
+        mtryDate: '',
+        exptMovDate: '',
+        exptDate: '',
+        exptComDate: '',
+        compYear: '',
+        shaYn: 'N',
+        custNo: '',
+        offNo: user?.offNo || '',
+        rtNo: user?.rtNo || '',
+        owner: '',
+        ownerTel: '',
+        ownerId: '',
+        buyer: '',
+        buyerTel: '',
+        buyerId: '',
+        cnNo: '',
+        cnDt: '',
+        cnType: '',
+        cnDoc: '',
+        cnVer: '',
+        tradeAmt: '',
+        cnAmtPart: '',
+        cnAmtPartDate: '',
+        cnAmt: '',
+        cnAmtDate: '',
+        midAmt: '',
+        midAmtDate: '',
+        rmdAmt: '',
+        rmdAmtDate: '',
+        spcCnDesc: '',
+        mvnPsbYn: 'N',
+        houseRental: 'N',
+        petYn: 'N',
+        top: '',
+        ptMemo: '',
+        userId: user?.userId || '',
+      });
+      setHolders([]);
+      setCurrentHolder({
+        holderRegDate: '',
+        holderName: '',
+        holderPhone: '',
+        custNo: '',
+        holderRelation: '',
+        holderMemo: '',
+      });
+      setShowHolderHistory(false);
+    }
+  }, [editData]);
+
+  const loadHolders = async (ptNo) => {
+    try {
+      const response = await holderService.getList(ptNo);
+      if (response.success && response.data?.ptHolders) {
+        const holderList = response.data.ptHolders;
+        setHolders(holderList);
+
+        // holderType별로 분리하여 각 카드에 설정
+        const ownerHolder = holderList.find(h => h.holderType === 'OWNER');
+        const sellerHolder = holderList.find(h => h.holderType === 'SELLER');
+        const buyerHolder = holderList.find(h => h.holderType === 'BUYER');
+
+        // 소유주 정보 설정
+        if (ownerHolder) {
+          setCurrentHolder({
+            holderRegDate: ownerHolder.holderRegDate || '',
+            holderName: ownerHolder.holderName || '',
+            holderPhone: ownerHolder.holderPhone || '',
+            custNo: ownerHolder.custNo || '',
+            holderRelation: ownerHolder.holderRelation || '',
+            holderMemo: ownerHolder.holderMemo || '',
+          });
+          setEditingHolderIdx(ownerHolder.holderIdx);
+        }
+
+        // 매도인/임대인 정보 설정
+        if (sellerHolder) {
+          setFormData(prev => ({
+            ...prev,
+            owner: sellerHolder.holderName || '',
+            ownerTel: sellerHolder.holderPhone || '',
+            ownerId: sellerHolder.custNo || '',
+          }));
+        }
+
+        // 임차인 정보 설정
+        if (buyerHolder) {
+          setFormData(prev => ({
+            ...prev,
+            buyer: buyerHolder.holderName || '',
+            buyerTel: buyerHolder.holderPhone || '',
+            buyerId: buyerHolder.custNo || '',
+          }));
+        }
+      }
+    } catch (error) {
+      console.error('소유주 정보 조회 실패:', error);
+    }
+  };
+
+  const toggleSection = (section) => {
+    setExpandedSections((prev) => ({
+      ...prev,
+      [section]: !prev[section],
+    }));
+  };
+
+  const handleShowHolderDetail = (type) => {
+    let holderData = null;
+
+    if (type === 'OWNER') {
+      holderData = {
+        holderType: 'OWNER',
+        holderName: currentHolder.holderName,
+        holderPhone: currentHolder.holderPhone,
+        custNo: currentHolder.custNo,
+        holderRelation: currentHolder.holderRelation,
+        holderRegDate: currentHolder.holderRegDate,
+        holderMemo: currentHolder.holderMemo,
+      };
+    } else if (type === 'SELLER') {
+      holderData = {
+        holderType: 'SELLER',
+        holderName: formData.owner,
+        holderPhone: formData.ownerTel,
+        custNo: formData.ownerId,
+      };
+    } else if (type === 'BUYER') {
+      holderData = {
+        holderType: 'BUYER',
+        holderName: formData.buyer,
+        holderPhone: formData.buyerTel,
+        custNo: formData.buyerId,
+      };
+    }
+
+    setHolderDetailModal({ open: true, type, data: holderData });
+  };
+
+  const closeHolderDetailModal = () => {
+    setHolderDetailModal({ open: false, type: null, data: null });
+  };
+
+  const handleChange = (field, value) => {
+    setFormData(prev => ({ ...prev, [field]: value }));
+  };
+
+  const handleHolderChange = (field, value) => {
+    setCurrentHolder(prev => ({ ...prev, [field]: value }));
+
+    // 관계 필드가 "직접입력"이면 커스텀 입력 모드 활성화
+    if (field === 'holderRelation') {
+      setIsCustomRelation(value === '직접입력');
+      if (value !== '직접입력') {
+        // 직접입력이 아닌 경우 선택된 값 설정
+        setCurrentHolder(prev => ({ ...prev, holderRelation: value }));
+      } else {
+        // 직접입력 선택 시 빈 값으로 초기화
+        setCurrentHolder(prev => ({ ...prev, holderRelation: '' }));
+      }
+    }
+  };
+
+  const handleCheckboxChange = (field, value, checked) => {
+    setFormData(prev => {
+      const currentArray = prev[field] || [];
+      if (checked) {
+        return { ...prev, [field]: [...currentArray, value] };
+      } else {
+        return { ...prev, [field]: currentArray.filter(v => v !== value) };
+      }
+    });
+  };
+
+  const handleSaveHolder = async () => {
+    if (!currentHolder.holderName) {
+      toast.error('소유주명을 입력해주세요.');
+      return;
+    }
+
+    if (!editData?.ptNo) {
+      toast.error('물건을 먼저 저장해주세요.');
+      return;
+    }
+
+    try {
+      // 등록일자를 자동으로 현재 날짜로 설정 (신규 등록 시)
+      const holderDataToSave = {
+        ...currentHolder,
+        holderRegDate: editingHolderIdx !== null
+          ? currentHolder.holderRegDate
+          : new Date().toISOString().split('T')[0]
+      };
+
+      if (editingHolderIdx !== null) {
+        // 수정
+        await holderService.update(
+          editData.ptNo,
+          editingHolderIdx,
+          user?.userId,
+          holderDataToSave
+        );
+        toast.success('소유주 정보가 수정되었습니다.');
+      } else {
+        // 신규 등록
+        await holderService.create(
+          editData.ptNo,
+          user?.userId,
+          holderDataToSave
+        );
+        toast.success('소유주 정보가 등록되었습니다.');
+      }
+
+      // 소유주 목록 새로고침
+      await loadHolders(editData.ptNo);
+      setEditingHolderIdx(null);
+    } catch (error) {
+      console.error('소유주 정보 저장 실패:', error);
+      toast.error('소유주 정보 저장에 실패했습니다.');
+    }
+  };
+
+  const handleEditHolder = (holder) => {
+    setCurrentHolder({
+      holderRegDate: holder.holderRegDate || '',
+      holderName: holder.holderName || '',
+      holderPhone: holder.holderPhone || '',
+      custNo: holder.custNo || '',
+      holderRelation: holder.holderRelation || '',
+      holderMemo: holder.holderMemo || '',
+    });
+    setEditingHolderIdx(holder.holderIdx);
+
+    // 기본 옵션이 아니면 직접입력 모드로 설정
+    const defaultOptions = ['', '본인', '배우자', '자녀', '부모'];
+    if (!defaultOptions.includes(holder.holderRelation)) {
+      setIsCustomRelation(true);
+    } else {
+      setIsCustomRelation(false);
+    }
+  };
+
+  const handleDeleteHolder = async (holder) => {
+    if (!confirm('소유주 정보를 삭제하시겠습니까?')) return;
+
+    try {
+      await holderService.delete(
+        editData.ptNo,
+        holder.holderIdx,
+        user?.userId
+      );
+      toast.success('소유주 정보가 삭제되었습니다.');
+      await loadHolders(editData.ptNo);
+    } catch (error) {
+      console.error('소유주 정보 삭제 실패:', error);
+      toast.error('소유주 정보 삭제에 실패했습니다.');
+    }
+  };
+
+  const handleNewHolder = () => {
+    setCurrentHolder({
+      holderRegDate: new Date().toISOString().split('T')[0],
+      holderName: '',
+      holderPhone: '',
+      custNo: '',
+      holderRelation: '',
+      holderMemo: '',
+    });
+    setEditingHolderIdx(null);
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+
+    if (!formData.ptName) {
+      toast.error('물건명을 입력해주세요.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      // holders 배열에서 빈 행 제거하고 등록일자 설정
+      const holdersData = holders
+        .filter(h => h.holderName || h.holderPhone) // 이름이나 연락처가 있는 행만
+        .map(h => ({
+          ...h,
+          holderRegDate: h.holderRegDate || new Date().toISOString().split('T')[0],
+          custNo: h.custNo || null,
+        }));
+
+      // 물건 데이터에 holders 포함
+      const propertyData = {
+        ...formData,
+        holders: holdersData,
+      };
+
+      if (editData) {
+        await propertyService.update(editData.ptNo, propertyData);
+        toast.success('물건이 수정되었습니다.');
+        onSuccess?.();
+        // 수정 모드에서는 팝업을 닫지 않음
+      } else {
+        await propertyService.create(propertyData);
+        toast.success('물건이 등록되었습니다.');
+        onSuccess?.();
+        onClose();
+      }
+    } catch (error) {
+      console.error('물건 저장 실패:', error);
+      toast.error(editData ? '물건 수정에 실패했습니다.' : '물건 등록에 실패했습니다.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="property-form-page">
+      {/* 헤더 */}
+      <div className="page-header">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <h1 className="page-title">{editData ? '물건 수정' : '물건 등록'}</h1>
+          {editData && formData.regDt && (
+            <div style={{ display: 'flex', gap: '12px', fontSize: '13px', color: '#64748b' }}>
+              <span>등록자: {formData.regId || '-'}</span>
+              <span>등록일: {formData.regDt ? new Date(formData.regDt).toLocaleDateString() : '-'}</span>
+              <span style={{ color: '#ef4444', fontWeight: '500' }}>
+                최근수정일: {formData.updDt ? new Date(formData.updDt).toLocaleString() : '-'}
+              </span>
+            </div>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="close-btn"
+          title="닫기"
+        >
+          <X className="w-5 h-5" />
+        </button>
+      </div>
+
+      {/* 탭 네비게이션 */}
+      <div style={{
+        display: 'flex',
+        borderBottom: '1px solid #e2e8f0',
+        marginBottom: '16px',
+        background: '#f8fafc'
+      }}>
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => setActiveTab(tab.id)}
+            style={{
+              padding: '12px 24px',
+              border: 'none',
+              background: activeTab === tab.id ? 'white' : 'transparent',
+              borderBottom: activeTab === tab.id ? '2px solid #3b82f6' : '2px solid transparent',
+              color: activeTab === tab.id ? '#3b82f6' : '#64748b',
+              fontWeight: activeTab === tab.id ? '600' : '400',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              fontSize: '14px',
+            }}
+          >
+            <tab.icon className="w-4 h-4" />
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* 폼 */}
+      <form onSubmit={handleSubmit} className="page-form">
+        <div className="form-content" style={{ overflow: 'auto', maxHeight: 'calc(100vh - 200px)' }}>
+          {activeTab === 'property' && (
+          <div>
+          {/* 3개 카드: 소유주 | 임차인 | 상담이력 */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginBottom: '8px' }}>
+            {/* 1. 소유주 카드 */}
+            <div style={{ border: '1px solid #cbd5e1', padding: '6px', background: '#f8fafc' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                <div style={{ fontSize: '13px', fontWeight: '600', color: '#1e293b' }}>소유주</div>
+                <div style={{ display: 'flex', gap: '4px' }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const newHolder = {
+                        holderIdx: null,
+                        holderType: 'OWNER',
+                        holderName: '',
+                        holderPhone: '',
+                        holderRelation: '',
+                        holderMemo: '',
+                      };
+                      setHolders([...holders, newHolder]);
+                    }}
+                    style={{ padding: '2px 6px', fontSize: '11px', border: '1px solid #3b82f6', background: '#3b82f6', color: 'white', cursor: 'pointer', borderRadius: '3px' }}
+                  >
+                    + 추가
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowHolderHistory(!showHolderHistory)}
+                    style={{ padding: '2px 6px', fontSize: '11px', border: '1px solid #64748b', background: 'white', color: '#64748b', cursor: 'pointer', borderRadius: '3px' }}
+                  >
+                    이력보기
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const ownerData = holders.filter(h => h.holderType === 'OWNER');
+                      const win = window.open('', '_blank', 'width=800,height=600');
+                      win.document.write(`
+                        <html>
+                          <head>
+                            <title>소유주 정보</title>
+                            <style>
+                              body { font-family: Arial, sans-serif; padding: 20px; }
+                              h2 { color: #1e293b; margin-bottom: 20px; }
+                              table { width: 100%; border-collapse: collapse; }
+                              th, td { padding: 8px; border: 1px solid #cbd5e1; text-align: left; }
+                              th { background: #f1f5f9; font-weight: 600; }
+                              tr:hover { background: #f8fafc; }
+                            </style>
+                          </head>
+                          <body>
+                            <h2>소유주 정보</h2>
+                            <table>
+                              <thead>
+                                <tr>
+                                  <th>성명</th>
+                                  <th>연락처</th>
+                                  <th>관계</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                ${ownerData.length > 0 ? ownerData.map(h => `
+                                  <tr>
+                                    <td>${h.holderName || ''}</td>
+                                    <td>${h.holderPhone || ''}</td>
+                                    <td>${h.holderRelation || ''}</td>
+                                  </tr>
+                                `).join('') : '<tr><td colspan="3" style="text-align: center; color: #94a3b8;">소유주 정보 없음</td></tr>'}
+                              </tbody>
+                            </table>
+                          </body>
+                        </html>
+                      `);
+                      win.document.close();
+                    }}
+                    style={{ padding: '2px 6px', fontSize: '11px', border: '1px solid #64748b', background: 'white', color: '#64748b', cursor: 'pointer', borderRadius: '3px' }}
+                  >
+                    크게보기
+                  </button>
+                </div>
+              </div>
+              <div style={{ maxHeight: '150px', overflow: 'auto' }}>
+              <table style={{ width: '100%', fontSize: '11px', borderCollapse: 'collapse', background: 'white' }}>
+                <thead>
+                  <tr style={{ background: '#f1f5f9' }}>
+                    <th style={{ padding: '4px 2px', border: '1px solid #cbd5e1' }}>성명</th>
+                    <th style={{ padding: '4px 2px', border: '1px solid #cbd5e1' }}>연락처</th>
+                    <th style={{ padding: '4px 2px', border: '1px solid #cbd5e1' }}>관계</th>
+                    <th style={{ padding: '4px 2px', border: '1px solid #cbd5e1', width: '40px' }}>삭제</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {holders.filter(h => h.holderType === 'OWNER').map((holder, index) => {
+                    const actualIndex = holders.findIndex(h => h === holder);
+                    return (
+                      <tr key={actualIndex}>
+                        <td style={{ padding: '2px', border: '1px solid #cbd5e1' }}>
+                          <input
+                            type="text"
+                            value={holder.holderName || ''}
+                            onChange={(e) => {
+                              const newHolders = [...holders];
+                              newHolders[actualIndex].holderName = e.target.value;
+                              setHolders(newHolders);
+                            }}
+                            style={{ width: '100%', padding: '2px', fontSize: '11px', border: 'none' }}
+                            placeholder="이름"
+                          />
+                        </td>
+                        <td style={{ padding: '2px', border: '1px solid #cbd5e1' }}>
+                          <input
+                            type="text"
+                            value={holder.holderPhone || ''}
+                            onChange={(e) => {
+                              const newHolders = [...holders];
+                              newHolders[actualIndex].holderPhone = e.target.value;
+                              setHolders(newHolders);
+                            }}
+                            style={{ width: '100%', padding: '2px', fontSize: '11px', border: 'none' }}
+                            placeholder="연락처"
+                          />
+                        </td>
+                        <td style={{ padding: '2px', border: '1px solid #cbd5e1' }}>
+                          <select
+                            value={holder.holderRelation || ''}
+                            onChange={(e) => {
+                              const newHolders = [...holders];
+                              newHolders[actualIndex].holderRelation = e.target.value;
+                              setHolders(newHolders);
+                            }}
+                            style={{ width: '100%', padding: '2px', fontSize: '11px', border: 'none' }}
+                          >
+                            <option value="">선택</option>
+                            <option value="본인">본인</option>
+                            <option value="배우자">배우자</option>
+                            <option value="자녀">자녀</option>
+                            <option value="부모">부모</option>
+                          </select>
+                        </td>
+                        <td style={{ padding: '2px', border: '1px solid #cbd5e1', textAlign: 'center' }}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const newHolders = holders.filter((_, i) => i !== actualIndex);
+                              setHolders(newHolders);
+                            }}
+                            style={{ padding: '1px 4px', fontSize: '10px', border: '1px solid #ef4444', background: '#ef4444', color: 'white', cursor: 'pointer', borderRadius: '2px' }}
+                          >
+                            ×
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {holders.filter(h => h.holderType === 'OWNER').length === 0 && (
+                    <tr>
+                      <td colSpan={4} style={{ padding: '10px', textAlign: 'center', color: '#94a3b8', fontSize: '11px', border: '1px solid #cbd5e1' }}>
+                        소유주 정보 없음
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+              </div>
+            </div>
+
+            {/* 2. 임차인 카드 */}
+            <div style={{ border: '1px solid #cbd5e1', padding: '6px', background: '#faf5ff' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                <div style={{ fontSize: '13px', fontWeight: '600', color: '#1e293b' }}>임차인</div>
+                <div style={{ display: 'flex', gap: '4px' }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const newHolder = {
+                        holderIdx: null,
+                        holderType: 'BUYER',
+                        holderName: '',
+                        holderPhone: '',
+                        holderRelation: '',
+                        holderMemo: '',
+                      };
+                      setHolders([...holders, newHolder]);
+                    }}
+                    style={{ padding: '2px 6px', fontSize: '11px', border: '1px solid #8b5cf6', background: '#8b5cf6', color: 'white', cursor: 'pointer', borderRadius: '3px' }}
+                  >
+                    + 추가
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowHolderHistory(!showHolderHistory)}
+                    style={{ padding: '2px 6px', fontSize: '11px', border: '1px solid #64748b', background: 'white', color: '#64748b', cursor: 'pointer', borderRadius: '3px' }}
+                  >
+                    이력보기
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const buyerData = holders.filter(h => h.holderType === 'BUYER');
+                      const win = window.open('', '_blank', 'width=800,height=600');
+                      win.document.write(`
+                        <html>
+                          <head>
+                            <title>임차인 정보</title>
+                            <style>
+                              body { font-family: Arial, sans-serif; padding: 20px; }
+                              h2 { color: #1e293b; margin-bottom: 20px; }
+                              table { width: 100%; border-collapse: collapse; }
+                              th, td { padding: 8px; border: 1px solid #cbd5e1; text-align: left; }
+                              th { background: #f1f5f9; font-weight: 600; }
+                              tr:hover { background: #f8fafc; }
+                            </style>
+                          </head>
+                          <body>
+                            <h2>임차인 정보</h2>
+                            <table>
+                              <thead>
+                                <tr>
+                                  <th>성명</th>
+                                  <th>연락처</th>
+                                  <th>메모</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                ${buyerData.length > 0 ? buyerData.map(h => `
+                                  <tr>
+                                    <td>${h.holderName || ''}</td>
+                                    <td>${h.holderPhone || ''}</td>
+                                    <td>${h.holderMemo || ''}</td>
+                                  </tr>
+                                `).join('') : '<tr><td colspan="3" style="text-align: center; color: #94a3b8;">임차인 정보 없음</td></tr>'}
+                              </tbody>
+                            </table>
+                          </body>
+                        </html>
+                      `);
+                      win.document.close();
+                    }}
+                    style={{ padding: '2px 6px', fontSize: '11px', border: '1px solid #64748b', background: 'white', color: '#64748b', cursor: 'pointer', borderRadius: '3px' }}
+                  >
+                    크게보기
+                  </button>
+                </div>
+              </div>
+              <div style={{ maxHeight: '150px', overflow: 'auto' }}>
+              <table style={{ width: '100%', fontSize: '11px', borderCollapse: 'collapse', background: 'white' }}>
+                <thead>
+                  <tr style={{ background: '#f1f5f9' }}>
+                    <th style={{ padding: '4px 2px', border: '1px solid #cbd5e1' }}>성명</th>
+                    <th style={{ padding: '4px 2px', border: '1px solid #cbd5e1' }}>연락처</th>
+                    <th style={{ padding: '4px 2px', border: '1px solid #cbd5e1' }}>메모</th>
+                    <th style={{ padding: '4px 2px', border: '1px solid #cbd5e1', width: '40px' }}>삭제</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {holders.filter(h => h.holderType === 'BUYER').map((holder, index) => {
+                    const actualIndex = holders.findIndex(h => h === holder);
+                    return (
+                      <tr key={actualIndex}>
+                        <td style={{ padding: '2px', border: '1px solid #cbd5e1' }}>
+                          <input
+                            type="text"
+                            value={holder.holderName || ''}
+                            onChange={(e) => {
+                              const newHolders = [...holders];
+                              newHolders[actualIndex].holderName = e.target.value;
+                              setHolders(newHolders);
+                            }}
+                            style={{ width: '100%', padding: '2px', fontSize: '11px', border: 'none' }}
+                            placeholder="이름"
+                          />
+                        </td>
+                        <td style={{ padding: '2px', border: '1px solid #cbd5e1' }}>
+                          <input
+                            type="text"
+                            value={holder.holderPhone || ''}
+                            onChange={(e) => {
+                              const newHolders = [...holders];
+                              newHolders[actualIndex].holderPhone = e.target.value;
+                              setHolders(newHolders);
+                            }}
+                            style={{ width: '100%', padding: '2px', fontSize: '11px', border: 'none' }}
+                            placeholder="연락처"
+                          />
+                        </td>
+                        <td style={{ padding: '2px', border: '1px solid #cbd5e1' }}>
+                          <input
+                            type="text"
+                            value={holder.holderMemo || ''}
+                            onChange={(e) => {
+                              const newHolders = [...holders];
+                              newHolders[actualIndex].holderMemo = e.target.value;
+                              setHolders(newHolders);
+                            }}
+                            style={{ width: '100%', padding: '2px', fontSize: '11px', border: 'none' }}
+                            placeholder="메모"
+                          />
+                        </td>
+                        <td style={{ padding: '2px', border: '1px solid #cbd5e1', textAlign: 'center' }}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const newHolders = holders.filter((_, i) => i !== actualIndex);
+                              setHolders(newHolders);
+                            }}
+                            style={{ padding: '1px 4px', fontSize: '10px', border: '1px solid #ef4444', background: '#ef4444', color: 'white', cursor: 'pointer', borderRadius: '2px' }}
+                          >
+                            ×
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {holders.filter(h => h.holderType === 'BUYER').length === 0 && (
+                    <tr>
+                      <td colSpan={4} style={{ padding: '10px', textAlign: 'center', color: '#94a3b8', fontSize: '11px', border: '1px solid #cbd5e1' }}>
+                        임차인 정보 없음
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+              </div>
+            </div>
+
+            {/* 3. 상담이력 카드 */}
+            <div style={{ border: '1px solid #cbd5e1', padding: '6px', background: '#fef3c7' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+              <div style={{ fontSize: '13px', fontWeight: '600', color: '#1e293b' }}>상담이력</div>
+              <div style={{ display: 'flex', gap: '4px' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    // TODO: 상담이력 추가 기능
+                  }}
+                  style={{ padding: '2px 6px', fontSize: '11px', border: '1px solid #f59e0b', background: '#f59e0b', color: 'white', cursor: 'pointer', borderRadius: '3px' }}
+                >
+                  + 추가
+                </button>
+                <button
+                  type="button"
+                  style={{ padding: '2px 6px', fontSize: '11px', border: '1px solid #64748b', background: 'white', color: '#64748b', cursor: 'pointer', borderRadius: '3px' }}
+                >
+                  이력보기
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const win = window.open('', '_blank', 'width=1000,height=600');
+                    win.document.write(`
+                      <html>
+                        <head>
+                          <title>상담이력 정보</title>
+                          <style>
+                            body { font-family: Arial, sans-serif; padding: 20px; }
+                            h2 { color: #1e293b; margin-bottom: 20px; }
+                            table { width: 100%; border-collapse: collapse; }
+                            th, td { padding: 8px; border: 1px solid #cbd5e1; text-align: left; }
+                            th { background: #f1f5f9; font-weight: 600; }
+                            tr:hover { background: #f8fafc; }
+                          </style>
+                        </head>
+                        <body>
+                          <h2>상담이력 정보</h2>
+                          <table>
+                            <thead>
+                              <tr>
+                                <th>날짜</th>
+                                <th>상담내용</th>
+                                <th>담당자</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              <tr><td colspan="3" style="text-align: center; color: #94a3b8;">상담이력 정보 없음</td></tr>
+                            </tbody>
+                          </table>
+                        </body>
+                      </html>
+                    `);
+                    win.document.close();
+                  }}
+                  style={{ padding: '2px 6px', fontSize: '11px', border: '1px solid #64748b', background: 'white', color: '#64748b', cursor: 'pointer', borderRadius: '3px' }}
+                >
+                  크게보기
+                </button>
+              </div>
+            </div>
+            <div style={{ maxHeight: '150px', overflow: 'auto' }}>
+            <table style={{ width: '100%', fontSize: '11px', borderCollapse: 'collapse', background: 'white' }}>
+              <thead>
+                <tr style={{ background: '#f1f5f9' }}>
+                  <th style={{ padding: '4px 2px', border: '1px solid #cbd5e1' }}>날짜</th>
+                  <th style={{ padding: '4px 2px', border: '1px solid #cbd5e1' }}>상담내용</th>
+                  <th style={{ padding: '4px 2px', border: '1px solid #cbd5e1' }}>담당자</th>
+                  <th style={{ padding: '4px 2px', border: '1px solid #cbd5e1', width: '40px' }}>삭제</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td colSpan={4} style={{ padding: '10px', textAlign: 'center', color: '#94a3b8', fontSize: '11px', border: '1px solid #cbd5e1' }}>
+                    상담이력 정보 없음
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            </div>
+            </div>
+          </div>
+
+          {/* 기본 정보 입력 테이블 */}
+          <div style={{ marginTop: '8px' }}>
+            <table style={{ width: '100%', fontSize: '13px', borderCollapse: 'collapse' }}>
+              <tbody>
+                {/* 매물종류 */}
+                <tr>
+                  <td style={{ padding: '4px 6px', width: '110px', fontWeight: '600', border: '1px solid #cbd5e1', background: '#f8fafc' }}>매물종류 *</td>
+                  <td style={{ padding: '2px', border: '1px solid #cbd5e1' }} colSpan="3">
+                    <select
+                      value={formData.ptType}
+                      onChange={(e) => handleChange('ptType', e.target.value)}
+                      style={{ width: '100%', padding: '4px 6px', fontSize: '13px', border: 'none' }}
+                    >
+                      {PROPERTY_TYPES.map(type => (
+                        <option key={type.code} value={type.code}>{type.label}</option>
+                      ))}
+                    </select>
+                  </td>
+                </tr>
+
+                {/* 소재지 */}
+                <tr>
+                  <td style={{ padding: '4px 6px', fontWeight: '600', border: '1px solid #cbd5e1', background: '#f8fafc' }}>소재지 *</td>
+                  <td style={{ padding: '2px', border: '1px solid #cbd5e1' }} colSpan="3">
+            <table style={{ width: '100%', fontSize: '13px', borderCollapse: 'collapse' }}>
+              <tbody>
+                <tr>
+                  <td style={{ padding: '2px 4px', width: '90px', fontWeight: '500', border: '1px solid #cbd5e1' }}>주소</td>
+                  <td style={{ padding: '2px', border: '1px solid #cbd5e1' }} colSpan="5">
+                    <div style={{ display: 'flex', gap: '4px', marginBottom: '2px' }}>
+                      <select
+                        value={selectedSido}
+                        onChange={(e) => {
+                          const selected = sidoList.find(item => item.bjdCode === e.target.value);
+                          handleSidoChange(e.target.value);
+                          handleChange('addr1', selected?.bjdName || '');
+                        }}
+                        style={{ flex: 1, padding: '2px 4px', fontSize: '13px', border: '1px solid #cbd5e1' }}
+                      >
+                        <option value="">시/도</option>
+                        {sidoList.map((sido) => (
+                          <option key={sido.bjdCode} value={sido.bjdCode}>{sido.bjdName}</option>
+                        ))}
+                      </select>
+                      <select
+                        value={selectedSigungu}
+                        onChange={(e) => {
+                          const selected = sigunguList.find(item => item.bjdCode === e.target.value);
+                          handleSigunguChange(e.target.value);
+                          handleChange('addr2', selected?.bjdName || '');
+                        }}
+                        disabled={!selectedSido}
+                        style={{ flex: 1, padding: '2px 4px', fontSize: '13px', border: '1px solid #cbd5e1', background: !selectedSido ? '#f1f5f9' : 'white' }}
+                      >
+                        <option value="">시/군/구</option>
+                        {sigunguList.map((sigungu) => (
+                          <option key={sigungu.bjdCode} value={sigungu.bjdCode}>{sigungu.bjdName}</option>
+                        ))}
+                      </select>
+                      <select
+                        value={selectedEupMyeonDong}
+                        onChange={(e) => {
+                          const selected = eupMyeonDongList.find(item => item.bjdCode === e.target.value);
+                          handleEupMyeonDongChange(e.target.value, selected?.bjdName || '');
+                        }}
+                        disabled={!selectedSigungu}
+                        style={{ flex: 1, padding: '2px 4px', fontSize: '13px', border: '1px solid #cbd5e1', background: !selectedSigungu ? '#f1f5f9' : 'white' }}
+                      >
+                        <option value="">읍/면/동</option>
+                        {eupMyeonDongList.map((emd) => (
+                          <option key={emd.bjdCode} value={emd.bjdCode}>{emd.bjdName}</option>
+                        ))}
+                      </select>
+                      <select
+                        value={formData.danjiCode}
+                        onChange={(e) => {
+                          const selected = danjiList.find(item => item.buildingCode === e.target.value);
+                          handleDanjiChange(e.target.value, selected?.buildingName || '');
+                        }}
+                        disabled={!selectedEupMyeonDong}
+                        style={{ flex: 1, padding: '2px 4px', fontSize: '13px', border: '1px solid #cbd5e1', background: !selectedEupMyeonDong ? '#f1f5f9' : 'white' }}
+                      >
+                        <option value="">단지</option>
+                        {danjiList.map((danji) => (
+                          <option key={danji.buildingCode} value={danji.buildingCode}>{danji.buildingName}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div style={{ display: 'flex', gap: '4px' }}>
+                      <input
+                        type="text"
+                        value={formData.dong}
+                        onChange={(e) => handleChange('dong', e.target.value)}
+                        placeholder="동"
+                        style={{ flex: 1, padding: '2px 4px', fontSize: '13px', border: '1px solid #cbd5e1' }}
+                      />
+                      <input
+                        type="text"
+                        value={formData.floor}
+                        onChange={(e) => handleChange('floor', e.target.value)}
+                        placeholder="층"
+                        style={{ flex: 1, padding: '2px 4px', fontSize: '13px', border: '1px solid #cbd5e1' }}
+                      />
+                      <input
+                        type="text"
+                        value={formData.ho}
+                        onChange={(e) => handleChange('ho', e.target.value)}
+                        placeholder="호"
+                        style={{ flex: 1, padding: '2px 4px', fontSize: '13px', border: '1px solid #cbd5e1' }}
+                      />
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <input type="hidden" value={formData.addr5} />
+            <input type="hidden" value={formData.addrPost} />
+            <input type="hidden" value={formData.bjdCode} />
+            <input type="hidden" value={formData.danjiCode} />
+          </div>
+
+
+          {/* ■ 면적/층 정보 */}
+          <div style={{ marginTop: '8px' }}>
+            <div style={{ fontSize: '13px', fontWeight: '600', marginBottom: '4px', color: '#1e293b' }}>■ 면적/층 정보</div>
+            <table style={{ width: '100%', fontSize: '13px', borderCollapse: 'collapse' }}>
+              <tbody>
+                <tr>
+                  <td style={{ padding: '2px 4px', width: '90px', fontWeight: '500', border: '1px solid #cbd5e1' }}>공급면적(㎡)</td>
+                  <td style={{ padding: '2px', border: '1px solid #cbd5e1' }}>
+                    <input type="number" step="0.01" value={formData.supArea} onChange={(e) => handleChange('supArea', e.target.value)} style={{ width: '100%', padding: '2px 4px', fontSize: '13px', border: '1px solid #cbd5e1' }} />
+                  </td>
+                  <td style={{ padding: '2px 4px', width: '90px', fontWeight: '500', border: '1px solid #cbd5e1' }}>전용면적(㎡)</td>
+                  <td style={{ padding: '2px', border: '1px solid #cbd5e1' }}>
+                    <input type="number" step="0.01" value={formData.excArea} onChange={(e) => handleChange('excArea', e.target.value)} style={{ width: '100%', padding: '2px 4px', fontSize: '13px', border: '1px solid #cbd5e1' }} />
+                  </td>
+                  <td style={{ padding: '2px 4px', width: '90px', fontWeight: '500', border: '1px solid #cbd5e1' }}>대지지분(㎡)</td>
+                  <td style={{ padding: '2px', border: '1px solid #cbd5e1' }}>
+                    <input type="number" step="0.01" value={formData.landShare} onChange={(e) => handleChange('landShare', e.target.value)} style={{ width: '100%', padding: '2px 4px', fontSize: '13px', border: '1px solid #cbd5e1' }} />
+                  </td>
+                </tr>
+                <tr>
+                  <td style={{ padding: '2px 4px', fontWeight: '500', border: '1px solid #cbd5e1' }}>해당층</td>
+                  <td style={{ padding: '2px', border: '1px solid #cbd5e1' }}>
+                    <input type="number" value={formData.floor1} onChange={(e) => handleChange('floor1', e.target.value)} style={{ width: '100%', padding: '2px 4px', fontSize: '13px', border: '1px solid #cbd5e1' }} />
+                  </td>
+                  <td style={{ padding: '2px 4px', fontWeight: '500', border: '1px solid #cbd5e1' }}>탑층</td>
+                  <td style={{ padding: '2px', border: '1px solid #cbd5e1' }}>
+                    <input type="number" value={formData.floor2} onChange={(e) => handleChange('floor2', e.target.value)} style={{ width: '100%', padding: '2px 4px', fontSize: '13px', border: '1px solid #cbd5e1' }} />
+                  </td>
+                  <td style={{ padding: '2px 4px', fontWeight: '500', border: '1px solid #cbd5e1' }}>층(구)</td>
+                  <td style={{ padding: '2px', border: '1px solid #cbd5e1' }}>
+                    <input type="number" value={formData.floor} onChange={(e) => handleChange('floor', e.target.value)} style={{ width: '100%', padding: '2px 4px', fontSize: '13px', border: '1px solid #cbd5e1' }} />
+                  </td>
+                </tr>
+                <tr>
+                  <td style={{ padding: '2px 4px', fontWeight: '500', border: '1px solid #cbd5e1' }}>방 개수</td>
+                  <td style={{ padding: '2px', border: '1px solid #cbd5e1' }}>
+                    <input type="number" value={formData.roomCnt} onChange={(e) => handleChange('roomCnt', e.target.value)} style={{ width: '100%', padding: '2px 4px', fontSize: '13px', border: '1px solid #cbd5e1' }} />
+                  </td>
+                  <td style={{ padding: '2px 4px', fontWeight: '500', border: '1px solid #cbd5e1' }}>욕실 개수</td>
+                  <td style={{ padding: '2px', border: '1px solid #cbd5e1' }}>
+                    <input type="number" value={formData.bathCnt} onChange={(e) => handleChange('bathCnt', e.target.value)} style={{ width: '100%', padding: '2px 4px', fontSize: '13px', border: '1px solid #cbd5e1' }} />
+                  </td>
+                  <td style={{ padding: '2px 4px', fontWeight: '500', border: '1px solid #cbd5e1' }}>주차대수</td>
+                  <td style={{ padding: '2px', border: '1px solid #cbd5e1' }}>
+                    <input type="number" step="0.1" value={formData.pkCnt} onChange={(e) => handleChange('pkCnt', e.target.value)} style={{ width: '100%', padding: '2px 4px', fontSize: '13px', border: '1px solid #cbd5e1' }} />
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          {/* ■ 건물 정보 */}
+          <div style={{ marginTop: '8px' }}>
+            <div style={{ fontSize: '13px', fontWeight: '600', marginBottom: '4px', color: '#1e293b' }}>■ 건물 정보</div>
+            <table style={{ width: '100%', fontSize: '13px', borderCollapse: 'collapse' }}>
+              <tbody>
+                <tr>
+                  <td style={{ padding: '2px 4px', width: '90px', fontWeight: '500', border: '1px solid #cbd5e1' }}>아파트타입</td>
+                  <td style={{ padding: '2px', border: '1px solid #cbd5e1' }}>
+                    <input type="text" value={formData.aptTyp} onChange={(e) => handleChange('aptTyp', e.target.value)} placeholder="예: 84A" style={{ width: '100%', padding: '2px 4px', fontSize: '13px', border: '1px solid #cbd5e1' }} />
+                  </td>
+                  <td style={{ padding: '2px 4px', width: '90px', fontWeight: '500', border: '1px solid #cbd5e1' }}>세대수</td>
+                  <td style={{ padding: '2px', border: '1px solid #cbd5e1' }}>
+                    <input type="number" value={formData.houseCnt} onChange={(e) => handleChange('houseCnt', e.target.value)} style={{ width: '100%', padding: '2px 4px', fontSize: '13px', border: '1px solid #cbd5e1' }} />
+                  </td>
+                  <td style={{ padding: '2px 4px', width: '90px', fontWeight: '500', border: '1px solid #cbd5e1' }}>방향</td>
+                  <td style={{ padding: '2px', border: '1px solid #cbd5e1' }}>
+                    <select value={formData.dirStd} onChange={(e) => handleChange('dirStd', e.target.value)} style={{ width: '100%', padding: '2px 4px', fontSize: '13px', border: '1px solid #cbd5e1' }}>
+                      <option value="">선택</option>
+                      <option value="남향">남향</option>
+                      <option value="동향">동향</option>
+                      <option value="서향">서향</option>
+                      <option value="북향">북향</option>
+                      <option value="남동향">남동향</option>
+                      <option value="남서향">남서향</option>
+                      <option value="북동향">북동향</option>
+                      <option value="북서향">북서향</option>
+                    </select>
+                  </td>
+                </tr>
+                <tr>
+                  <td style={{ padding: '2px 4px', fontWeight: '500', border: '1px solid #cbd5e1' }}>난방방식</td>
+                  <td style={{ padding: '2px', border: '1px solid #cbd5e1' }}>
+                    <select value={formData.heatMethod} onChange={(e) => handleChange('heatMethod', e.target.value)} style={{ width: '100%', padding: '2px 4px', fontSize: '13px', border: '1px solid #cbd5e1' }}>
+                      <option value="">선택</option>
+                      <option value="개별난방">개별난방</option>
+                      <option value="중앙난방">중앙난방</option>
+                      <option value="지역난방">지역난방</option>
+                    </select>
+                  </td>
+                  <td style={{ padding: '2px 4px', fontWeight: '500', border: '1px solid #cbd5e1' }}>난방연료</td>
+                  <td style={{ padding: '2px', border: '1px solid #cbd5e1' }}>
+                    <select value={formData.heatFuel} onChange={(e) => handleChange('heatFuel', e.target.value)} style={{ width: '100%', padding: '2px 4px', fontSize: '13px', border: '1px solid #cbd5e1' }}>
+                      <option value="">선택</option>
+                      <option value="도시가스">도시가스</option>
+                      <option value="기름">기름</option>
+                      <option value="전기">전기</option>
+                      <option value="심야전기">심야전기</option>
+                    </select>
+                  </td>
+                  <td style={{ padding: '2px 4px', fontWeight: '500', border: '1px solid #cbd5e1' }}>현관구조</td>
+                  <td style={{ padding: '2px', border: '1px solid #cbd5e1' }}>
+                    <select value={formData.entrStruct} onChange={(e) => handleChange('entrStruct', e.target.value)} style={{ width: '100%', padding: '2px 4px', fontSize: '13px', border: '1px solid #cbd5e1' }}>
+                      <option value="">선택</option>
+                      <option value="계단식">계단식</option>
+                      <option value="복도식">복도식</option>
+                      <option value="복합식">복합식</option>
+                    </select>
+                  </td>
+                </tr>
+                <tr>
+                  <td style={{ padding: '2px 4px', fontWeight: '500', border: '1px solid #cbd5e1' }}>건물구조</td>
+                  <td style={{ padding: '2px', border: '1px solid #cbd5e1' }}>
+                    <select value={formData.buidStruct} onChange={(e) => handleChange('buidStruct', e.target.value)} style={{ width: '100%', padding: '2px 4px', fontSize: '13px', border: '1px solid #cbd5e1' }}>
+                      <option value="">선택</option>
+                      <option value="철근콘크리트">철근콘크리트</option>
+                      <option value="철골">철골</option>
+                      <option value="철골콘크리트">철골콘크리트</option>
+                      <option value="벽돌">벽돌</option>
+                      <option value="기타">기타</option>
+                    </select>
+                  </td>
+                  <td style={{ padding: '2px 4px', fontWeight: '500', border: '1px solid #cbd5e1' }}>발코니확장</td>
+                  <td style={{ padding: '2px', border: '1px solid #cbd5e1' }}>
+                    <select value={formData.balcExt} onChange={(e) => handleChange('balcExt', e.target.value)} style={{ width: '100%', padding: '2px 4px', fontSize: '13px', border: '1px solid #cbd5e1' }}>
+                      <option value="">선택</option>
+                      <option value="Y">확장</option>
+                      <option value="N">미확장</option>
+                    </select>
+                  </td>
+                  <td style={{ padding: '2px 4px', fontWeight: '500', border: '1px solid #cbd5e1' }}>준공년도</td>
+                  <td style={{ padding: '2px', border: '1px solid #cbd5e1' }}>
+                    <input type="text" value={formData.compYear} onChange={(e) => handleChange('compYear', e.target.value)} placeholder="2020" maxLength="4" style={{ width: '100%', padding: '2px 4px', fontSize: '13px', border: '1px solid #cbd5e1' }} />
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          {/* ■ 금액 정보 */}
+          <div style={{ marginTop: '8px' }}>
+            <div style={{ fontSize: '13px', fontWeight: '600', marginBottom: '4px', color: '#1e293b' }}>■ 금액 정보</div>
+            <table style={{ width: '100%', fontSize: '13px', borderCollapse: 'collapse' }}>
+              <tbody>
+                <tr>
+                  <td style={{ padding: '2px 4px', width: '90px', fontWeight: '500', border: '1px solid #cbd5e1' }}>거래구분</td>
+                  <td style={{ padding: '4px', border: '1px solid #cbd5e1' }} colSpan="5">
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                      {tradeDivisions.map((division) => (
+                        <label key={division.value} style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', fontSize: '13px' }}>
+                          <input type="checkbox" checked={formData.saleDiv.includes(division.value)} onChange={(e) => handleCheckboxChange('saleDiv', division.value, e.target.checked)} style={{ cursor: 'pointer' }} />
+                          <span>{division.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </td>
+                </tr>
+                <tr>
+                  <td style={{ padding: '2px 4px', fontWeight: '500', border: '1px solid #cbd5e1' }}>매매가(만원)</td>
+                  <td style={{ padding: '2px', border: '1px solid #cbd5e1' }}>
+                    <input type="number" value={formData.saleAmt} onChange={(e) => handleChange('saleAmt', e.target.value)} style={{ width: '100%', padding: '2px 4px', fontSize: '13px', border: '1px solid #cbd5e1' }} />
+                  </td>
+                  <td style={{ padding: '2px 4px', fontWeight: '500', border: '1px solid #cbd5e1' }}>전세가(만원)</td>
+                  <td style={{ padding: '2px', border: '1px solid #cbd5e1' }}>
+                    <input type="number" value={formData.lesAmt} onChange={(e) => handleChange('lesAmt', e.target.value)} style={{ width: '100%', padding: '2px 4px', fontSize: '13px', border: '1px solid #cbd5e1' }} />
+                  </td>
+                  <td style={{ padding: '2px 4px', fontWeight: '500', border: '1px solid #cbd5e1' }}>보증금(만원)</td>
+                  <td style={{ padding: '2px', border: '1px solid #cbd5e1' }}>
+                    <input type="number" value={formData.protAmt} onChange={(e) => handleChange('protAmt', e.target.value)} style={{ width: '100%', padding: '2px 4px', fontSize: '13px', border: '1px solid #cbd5e1' }} />
+                  </td>
+                </tr>
+                <tr>
+                  <td style={{ padding: '2px 4px', fontWeight: '500', border: '1px solid #cbd5e1' }}>월세(만원)</td>
+                  <td style={{ padding: '2px', border: '1px solid #cbd5e1' }}>
+                    <input type="number" value={formData.monAmt} onChange={(e) => handleChange('monAmt', e.target.value)} style={{ width: '100%', padding: '2px 4px', fontSize: '13px', border: '1px solid #cbd5e1' }} />
+                  </td>
+                  <td style={{ padding: '2px 4px', fontWeight: '500', border: '1px solid #cbd5e1' }}>기타임대(만원)</td>
+                  <td style={{ padding: '2px', border: '1px solid #cbd5e1' }}>
+                    <input type="number" value={formData.etcAmt} onChange={(e) => handleChange('etcAmt', e.target.value)} style={{ width: '100%', padding: '2px 4px', fontSize: '13px', border: '1px solid #cbd5e1' }} />
+                  </td>
+                  <td style={{ padding: '2px 4px', fontWeight: '500', border: '1px solid #cbd5e1' }}>깔세(만원)</td>
+                  <td style={{ padding: '2px', border: '1px solid #cbd5e1' }}>
+                    <input type="number" value={formData.layAmt} onChange={(e) => handleChange('layAmt', e.target.value)} style={{ width: '100%', padding: '2px 4px', fontSize: '13px', border: '1px solid #cbd5e1' }} />
+                  </td>
+                </tr>
+                <tr>
+                  <td style={{ padding: '2px 4px', fontWeight: '500', border: '1px solid #cbd5e1' }}>현보증금(만원)</td>
+                  <td style={{ padding: '2px', border: '1px solid #cbd5e1' }}>
+                    <input type="number" value={formData.nowDepAmt} onChange={(e) => handleChange('nowDepAmt', e.target.value)} style={{ width: '100%', padding: '2px 4px', fontSize: '13px', border: '1px solid #cbd5e1' }} />
+                  </td>
+                  <td style={{ padding: '2px 4px', fontWeight: '500', border: '1px solid #cbd5e1' }}>현월차임(만원)</td>
+                  <td style={{ padding: '2px', border: '1px solid #cbd5e1' }}>
+                    <input type="number" value={formData.nowMonAmt} onChange={(e) => handleChange('nowMonAmt', e.target.value)} style={{ width: '100%', padding: '2px 4px', fontSize: '13px', border: '1px solid #cbd5e1' }} />
+                  </td>
+                  <td style={{ padding: '2px 4px', fontWeight: '500', border: '1px solid #cbd5e1' }}>융자금(만원)</td>
+                  <td style={{ padding: '2px', border: '1px solid #cbd5e1' }}>
+                    <input type="number" value={formData.loanAmt} onChange={(e) => handleChange('loanAmt', e.target.value)} style={{ width: '100%', padding: '2px 4px', fontSize: '13px', border: '1px solid #cbd5e1' }} />
+                  </td>
+                </tr>
+                <tr>
+                  <td style={{ padding: '2px 4px', fontWeight: '500', border: '1px solid #cbd5e1' }}>잔금후융자금(만원)</td>
+                  <td style={{ padding: '2px', border: '1px solid #cbd5e1' }}>
+                    <input type="number" value={formData.loanAmtAft} onChange={(e) => handleChange('loanAmtAft', e.target.value)} style={{ width: '100%', padding: '2px 4px', fontSize: '13px', border: '1px solid #cbd5e1' }} />
+                  </td>
+                  <td style={{ padding: '2px 4px', fontWeight: '500', border: '1px solid #cbd5e1' }}>관리비(만원)</td>
+                  <td style={{ padding: '2px', border: '1px solid #cbd5e1' }}>
+                    <input type="number" value={formData.maintCost} onChange={(e) => handleChange('maintCost', e.target.value)} style={{ width: '100%', padding: '2px 4px', fontSize: '13px', border: '1px solid #cbd5e1' }} />
+                  </td>
+                  <td style={{ padding: '2px 4px', fontWeight: '500', border: '1px solid #cbd5e1' }}>관리비 내역</td>
+                  <td style={{ padding: '2px', border: '1px solid #cbd5e1' }}>
+                    <input type="text" value={formData.maintDtl} onChange={(e) => handleChange('maintDtl', e.target.value)} placeholder="관리비, 주차비 포함" style={{ width: '100%', padding: '2px 4px', fontSize: '13px', border: '1px solid #cbd5e1' }} />
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+            {/* 계약 정보 - 나중에 다른 테이블과 연동 예정 */}
+            {/* <div>
+              <h3 className="text-lg font-medium text-gray-900 mb-4">계약 정보</h3>
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">계약번호</label>
+                  <input
+                    type="text"
+                    value={formData.cnNo}
+                    onChange={(e) => handleChange('cnNo', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">계약일</label>
+                  <input
+                    type="date"
+                    value={formData.cnDt}
+                    onChange={(e) => handleChange('cnDt', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">거래종류</label>
+                  <select
+                    value={formData.cnType}
+                    onChange={(e) => handleChange('cnType', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    <option value="">선택</option>
+                    <option value="매매">매매</option>
+                    <option value="전세">전세</option>
+                    <option value="월세">월세</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">양식문서</label>
+                  <input
+                    type="number"
+                    value={formData.cnDoc}
+                    onChange={(e) => handleChange('cnDoc', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">양식 버전</label>
+                  <input
+                    type="number"
+                    value={formData.cnVer}
+                    onChange={(e) => handleChange('cnVer', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">매매금액(원)</label>
+                  <input
+                    type="number"
+                    value={formData.tradeAmt}
+                    onChange={(e) => handleChange('tradeAmt', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">계약금일부(원)</label>
+                  <input
+                    type="number"
+                    value={formData.cnAmtPart}
+                    onChange={(e) => handleChange('cnAmtPart', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">계약금일부 납입일</label>
+                  <input
+                    type="date"
+                    value={formData.cnAmtPartDate}
+                    onChange={(e) => handleChange('cnAmtPartDate', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">계약금(원)</label>
+                  <input
+                    type="number"
+                    value={formData.cnAmt}
+                    onChange={(e) => handleChange('cnAmt', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">계약금 납입일</label>
+                  <input
+                    type="date"
+                    value={formData.cnAmtDate}
+                    onChange={(e) => handleChange('cnAmtDate', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">중도금(원)</label>
+                  <input
+                    type="number"
+                    value={formData.midAmt}
+                    onChange={(e) => handleChange('midAmt', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">중도금 납입일</label>
+                  <input
+                    type="date"
+                    value={formData.midAmtDate}
+                    onChange={(e) => handleChange('midAmtDate', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">잔금(원)</label>
+                  <input
+                    type="number"
+                    value={formData.rmdAmt}
+                    onChange={(e) => handleChange('rmdAmt', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">잔금 납입일</label>
+                  <input
+                    type="date"
+                    value={formData.rmdAmtDate}
+                    onChange={(e) => handleChange('rmdAmtDate', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+
+                <div className="col-span-3">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">특약내용</label>
+                  <textarea
+                    value={formData.spcCnDesc}
+                    onChange={(e) => handleChange('spcCnDesc', e.target.value)}
+                    rows="3"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+              </div>
+            </div> */}
+
+          {/* ■ 예정일/기타 정보 */}
+          <div style={{ marginTop: '8px' }}>
+            <div style={{ fontSize: '13px', fontWeight: '600', marginBottom: '4px', color: '#1e293b' }}>■ 예정일/기타 정보</div>
+            <table style={{ width: '100%', fontSize: '13px', borderCollapse: 'collapse' }}>
+              <tbody>
+                <tr>
+                  <td style={{ padding: '2px 4px', width: '90px', fontWeight: '500', border: '1px solid #cbd5e1' }}>진행상태</td>
+                  <td style={{ padding: '2px', border: '1px solid #cbd5e1' }}>
+                    <select value={formData.prgSts} onChange={(e) => handleChange('prgSts', e.target.value)} style={{ width: '100%', padding: '2px 4px', fontSize: '13px', border: '1px solid #cbd5e1' }}>
+                      <option value="PRGSTS01">접수</option>
+                      <option value="PRGSTS02">진행중</option>
+                      <option value="PRGSTS03">완료</option>
+                      <option value="PRGSTS04">보류</option>
+                    </select>
+                  </td>
+                  <td style={{ padding: '2px 4px', width: '90px', fontWeight: '500', border: '1px solid #cbd5e1' }}>만기일</td>
+                  <td style={{ padding: '2px', border: '1px solid #cbd5e1' }}>
+                    <input type="date" value={formData.mtryDate} onChange={(e) => handleChange('mtryDate', e.target.value)} style={{ width: '100%', padding: '2px 4px', fontSize: '13px', border: '1px solid #cbd5e1' }} />
+                  </td>
+                  <td style={{ padding: '2px 4px', width: '90px', fontWeight: '500', border: '1px solid #cbd5e1' }}>이사예정일</td>
+                  <td style={{ padding: '2px', border: '1px solid #cbd5e1' }}>
+                    <input type="date" value={formData.exptMovDate} onChange={(e) => handleChange('exptMovDate', e.target.value)} style={{ width: '100%', padding: '2px 4px', fontSize: '13px', border: '1px solid #cbd5e1' }} />
+                  </td>
+                </tr>
+                <tr>
+                  <td style={{ padding: '2px 4px', fontWeight: '500', border: '1px solid #cbd5e1' }}>입주예정일</td>
+                  <td style={{ padding: '2px', border: '1px solid #cbd5e1' }}>
+                    <input type="date" value={formData.exptDate} onChange={(e) => handleChange('exptDate', e.target.value)} style={{ width: '100%', padding: '2px 4px', fontSize: '13px', border: '1px solid #cbd5e1' }} />
+                  </td>
+                  <td style={{ padding: '2px 4px', fontWeight: '500', border: '1px solid #cbd5e1' }}>준공예정일</td>
+                  <td style={{ padding: '2px', border: '1px solid #cbd5e1' }}>
+                    <input type="date" value={formData.exptComDate} onChange={(e) => handleChange('exptComDate', e.target.value)} style={{ width: '100%', padding: '2px 4px', fontSize: '13px', border: '1px solid #cbd5e1' }} />
+                  </td>
+                  <td style={{ padding: '2px 4px', fontWeight: '500', border: '1px solid #cbd5e1' }}>공유여부</td>
+                  <td style={{ padding: '2px', border: '1px solid #cbd5e1' }}>
+                    <select value={formData.shaYn} onChange={(e) => handleChange('shaYn', e.target.value)} style={{ width: '100%', padding: '2px 4px', fontSize: '13px', border: '1px solid #cbd5e1' }}>
+                      <option value="N">비공유</option>
+                      <option value="Y">공유</option>
+                    </select>
+                  </td>
+                </tr>
+                <tr>
+                  <td style={{ padding: '2px 4px', fontWeight: '500', border: '1px solid #cbd5e1' }}>옵션</td>
+                  <td style={{ padding: '2px', border: '1px solid #cbd5e1' }}>
+                    <input type="text" value={formData.opt} onChange={(e) => handleChange('opt', e.target.value)} placeholder="풀옵션" style={{ width: '100%', padding: '2px 4px', fontSize: '13px', border: '1px solid #cbd5e1' }} />
+                  </td>
+                  <td style={{ padding: '2px 4px', fontWeight: '500', border: '1px solid #cbd5e1' }}>이전가능</td>
+                  <td style={{ padding: '2px', border: '1px solid #cbd5e1' }}>
+                    <select value={formData.mvnPsbYn} onChange={(e) => handleChange('mvnPsbYn', e.target.value)} style={{ width: '100%', padding: '2px 4px', fontSize: '13px', border: '1px solid #cbd5e1' }}>
+                      <option value="N">불가</option>
+                      <option value="Y">가능</option>
+                    </select>
+                  </td>
+                  <td style={{ padding: '2px 4px', fontWeight: '500', border: '1px solid #cbd5e1' }}>임대주택</td>
+                  <td style={{ padding: '2px', border: '1px solid #cbd5e1' }}>
+                    <select value={formData.houseRental} onChange={(e) => handleChange('houseRental', e.target.value)} style={{ width: '100%', padding: '2px 4px', fontSize: '13px', border: '1px solid #cbd5e1' }}>
+                      <option value="N">아니오</option>
+                      <option value="Y">예</option>
+                    </select>
+                  </td>
+                </tr>
+                <tr>
+                  <td style={{ padding: '2px 4px', fontWeight: '500', border: '1px solid #cbd5e1' }}>반려동물</td>
+                  <td style={{ padding: '2px', border: '1px solid #cbd5e1' }} colSpan="2">
+                    <select value={formData.petYn} onChange={(e) => handleChange('petYn', e.target.value)} style={{ width: '100%', padding: '2px 4px', fontSize: '13px', border: '1px solid #cbd5e1' }}>
+                      <option value="N">불가</option>
+                      <option value="Y">가능</option>
+                    </select>
+                  </td>
+                  <td style={{ padding: '2px 4px', fontWeight: '500', border: '1px solid #cbd5e1' }}>탑층여부</td>
+                  <td style={{ padding: '2px', border: '1px solid #cbd5e1' }} colSpan="2">
+                    <select value={formData.top} onChange={(e) => handleChange('top', e.target.value)} style={{ width: '100%', padding: '2px 4px', fontSize: '13px', border: '1px solid #cbd5e1' }}>
+                      <option value="">선택</option>
+                      <option value="Y">예</option>
+                      <option value="N">아니오</option>
+                    </select>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          </div>
+          )}
+
+          {activeTab === 'attachments' && (
+            <div>
+              <div style={{ padding: '40px', textAlign: 'center', color: '#94a3b8' }}>
+                <Paperclip className="w-12 h-12 mx-auto mb-4" style={{ color: '#cbd5e1' }} />
+                <p style={{ fontSize: '14px' }}>첨부파일 기능은 준비 중입니다.</p>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'detail' && (
+            <div style={{ padding: '40px', textAlign: 'center', color: '#94a3b8' }}>
+              <MessageSquare className="w-12 h-12 mx-auto mb-4" style={{ color: '#cbd5e1' }} />
+              <p style={{ fontSize: '14px' }}>상세정보 기능은 준비 중입니다.</p>
+            </div>
+          )}
+        </div>
+
+        {/* 푸터 버튼 */}
+        {activeTab === 'property' && (
+        <div className="page-footer">
+        <button
+          type="button"
+          onClick={() => {
+            if (editData && editData.ptNo) {
+              openWithProperty(editData);
+            } else {
+              toast.error('저장된 물건 정보만 정보망 전송이 가능합니다.');
+            }
+          }}
+          className="px-4 py-2 text-sm font-medium text-white bg-sky-500 rounded-md hover:bg-sky-600"
+        >
+          정보망전송
+        </button>
+        <div className="flex gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+          >
+            취소
+          </button>
+          <button
+            type="submit"
+            disabled={loading}
+            onClick={handleSubmit}
+            className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 disabled:opacity-50"
+          >
+            {loading ? '저장 중...' : (editData ? '수정' : '등록')}
+          </button>
+        </div>
+        </div>
+        )}
+      </form>
+
+      <style>{`
+        .property-form-page {
+          height: 100vh;
+          display: flex;
+          flex-direction: column;
+          background-color: #f9fafb;
+        }
+
+        .page-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 0.5rem 1rem;
+          background-color: white;
+          border-bottom: 1px solid #e5e7eb;
+          flex-shrink: 0;
+        }
+
+        .page-title {
+          font-size: 1.125rem;
+          font-weight: 600;
+          color: #111827;
+        }
+
+        .close-btn {
+          padding: 0.5rem;
+          border-radius: 0.375rem;
+          border: none;
+          background: none;
+          cursor: pointer;
+          color: #6b7280;
+          transition: all 0.2s;
+        }
+
+        .close-btn:hover {
+          background-color: #f3f4f6;
+          color: #111827;
+        }
+
+        .page-form {
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+        }
+
+        .form-content {
+          flex: 1;
+          overflow-y: auto;
+          padding: 1.5rem;
+        }
+
+        .page-footer {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 1rem 1.5rem;
+          background-color: white;
+          border-top: 1px solid #e5e7eb;
+          flex-shrink: 0;
+        }
+
+}
+        @keyframes pulse-slow {
+          0%, 100% {
+            box-shadow: 0 2px 4px rgba(99, 102, 241, 0.4);
+          }
+          50% {
+            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.8);
+          }
+        }
+
+        .animate-pulse-slow {
+          animation: pulse-slow 2s ease-in-out infinite;
+        }
+
+        .animate-pulse-slow:hover {
+          animation: none;
+        }
+
+        @keyframes slideDown {
+          from {
+            opacity: 0;
+            transform: translateY(-10px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+
+        .animate-slideDown {
+          animation: slideDown 0.3s ease-out;
+        }
+      `}</style>
+
+      {/* Holder 상세보기 모달 */}
+      {holderDetailModal.open && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 10000,
+        }} onClick={closeHolderDetailModal}>
+          <div style={{
+            background: 'white',
+            padding: '20px',
+            borderRadius: '8px',
+            width: '400px',
+            maxWidth: '90%',
+          }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '600' }}>
+                {holderDetailModal.type === 'OWNER' && '소유주 상세정보'}
+                {holderDetailModal.type === 'SELLER' && '매도인/임대인 상세정보'}
+                {holderDetailModal.type === 'BUYER' && '임차인 상세정보'}
+              </h3>
+              <button
+                type="button"
+                onClick={closeHolderDetailModal}
+                style={{
+                  border: 'none',
+                  background: 'none',
+                  fontSize: '20px',
+                  cursor: 'pointer',
+                  padding: '4px',
+                }}
+              >
+                ×
+              </button>
+            </div>
+            <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '16px' }}>
+              <table style={{ width: '100%', fontSize: '14px', borderCollapse: 'collapse' }}>
+                <tbody>
+                  <tr>
+                    <td style={{ padding: '8px', fontWeight: '500', width: '120px', borderBottom: '1px solid #e2e8f0' }}>구분</td>
+                    <td style={{ padding: '8px', borderBottom: '1px solid #e2e8f0' }}>
+                      {holderDetailModal.type === 'OWNER' && '소유주'}
+                      {holderDetailModal.type === 'SELLER' && '매도인/임대인'}
+                      {holderDetailModal.type === 'BUYER' && '임차인'}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style={{ padding: '8px', fontWeight: '500', borderBottom: '1px solid #e2e8f0' }}>성명</td>
+                    <td style={{ padding: '8px', borderBottom: '1px solid #e2e8f0' }}>
+                      {holderDetailModal.data?.holderName || '-'}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style={{ padding: '8px', fontWeight: '500', borderBottom: '1px solid #e2e8f0' }}>연락처</td>
+                    <td style={{ padding: '8px', borderBottom: '1px solid #e2e8f0' }}>
+                      {holderDetailModal.data?.holderPhone || '-'}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style={{ padding: '8px', fontWeight: '500', borderBottom: '1px solid #e2e8f0' }}>고객번호</td>
+                    <td style={{ padding: '8px', borderBottom: '1px solid #e2e8f0' }}>
+                      {holderDetailModal.data?.custNo || '-'}
+                    </td>
+                  </tr>
+                  {holderDetailModal.type === 'OWNER' && (
+                    <>
+                      <tr>
+                        <td style={{ padding: '8px', fontWeight: '500', borderBottom: '1px solid #e2e8f0' }}>관계</td>
+                        <td style={{ padding: '8px', borderBottom: '1px solid #e2e8f0' }}>
+                          {holderDetailModal.data?.holderRelation || '-'}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style={{ padding: '8px', fontWeight: '500', borderBottom: '1px solid #e2e8f0' }}>등록일자</td>
+                        <td style={{ padding: '8px', borderBottom: '1px solid #e2e8f0' }}>
+                          {holderDetailModal.data?.holderRegDate || '-'}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style={{ padding: '8px', fontWeight: '500', borderBottom: '1px solid #e2e8f0' }}>메모</td>
+                        <td style={{ padding: '8px', borderBottom: '1px solid #e2e8f0' }}>
+                          {holderDetailModal.data?.holderMemo || '-'}
+                        </td>
+                      </tr>
+                    </>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ marginTop: '16px', textAlign: 'right' }}>
+              <button
+                type="button"
+                onClick={closeHolderDetailModal}
+                style={{
+                  padding: '8px 16px',
+                  background: '#3b82f6',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                }}
+              >
+                닫기
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default PropertyFormPage;

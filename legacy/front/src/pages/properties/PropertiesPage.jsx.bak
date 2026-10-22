@@ -1,0 +1,2762 @@
+import React, { useState, useMemo, useEffect } from 'react';
+import { Building2, FileText, Plus, Filter, X, ChevronLeft, ChevronRight, Trash2, Upload } from 'lucide-react';
+import Card from '../../components/ui/Card';
+import CustomerTable from '../../components/ui/CustomerTable';
+import TableSettings from '../../components/ui/TableSettings';
+import { propertyService } from '../../services/propertyService';
+import { useAuthStore } from '../../stores/authStore';
+import { useHubModalStore } from '../../stores/hubModalStore';
+import { toast } from 'react-hot-toast';
+import ConsultationHistoryPanel from '../../components/consultation/ConsultationHistoryPanel';
+import PropertyModal from '../../components/properties/PropertyModal';
+import PropertyViewModal from '../../components/properties/PropertyViewModal';
+import PropertyBriefingModal from '../../components/properties/PropertyBriefingModal';
+import LayoutView from '../../components/properties/LayoutView';
+import { getPropertyTypeLabel } from '../../constants/propertyTypes';
+import { getPropertyAddressTwoLines, formatKoreanAmount } from '../../utils/propertyUtils';
+import { BUILDING_USES } from '../../constants/buildingUses';
+import addressService from '../../services/common/addressService';
+
+const PropertiesPage = () => {
+  const { user } = useAuthStore();
+  const { openWithProperty } = useHubModalStore();
+
+  // 페이지 타이틀 설정
+  useEffect(() => {
+    document.title = '공인중개사 ERP - 물건관리';
+  }, []);
+  const [activeTab, setActiveTab] = useState('all'); // 'all' 또는 'progress'
+  const [viewMode, setViewMode] = useState('sheet'); // 'sheet' 또는 'layout'
+  const [sortOrder, setSortOrder] = useState('recent_reg'); // 'recent_reg', 'first_reg', 'modified'
+  const [rowCount, setRowCount] = useState('20'); // '20', '30', 'all'
+  const [floorFilter, setFloorFilter] = useState('all'); // 'all', 'top', 'first'
+  const [selectedRegions, setSelectedRegions] = useState([]); // 선택된 지역 목록 (검색에 사용)
+  const [sidoList, setSidoList] = useState([]);
+  const [sigunguList, setSigunguList] = useState([]);
+  const [eupMyeonDongList, setEupMyeonDongList] = useState([]);
+  const [riList, setRiList] = useState([]);
+  const [searchFilters, setSearchFilters] = useState({
+    sido: '',
+    sigungu: '',
+    eupMyeonDong: '',
+    ri: '',
+    prgSts: '',
+    saleDiv: '',
+    priceMin: '',
+    priceMax: '',
+    areaMin: '',
+    areaMax: '',
+    memo: '',
+    buildingName: '',
+    ptType: '', // 물건 종류
+  });
+  const [showSummaryList, setShowSummaryList] = useState(true);
+  const [properties, setProperties] = useState([]);
+  const [summaries, setSummaries] = useState([]);
+  const [progressCount, setProgressCount] = useState(0);
+  const [selectedSummary, setSelectedSummary] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [pagination, setPagination] = useState({
+    page: 1,
+    pageSize: 20,
+    total: 0,
+  });
+  const [showPropertyModal, setShowPropertyModal] = useState(false);
+  const [showViewModal, setShowViewModal] = useState(false);
+  const [editPropertyData, setEditPropertyData] = useState(null);
+  const [selectedProperty, setSelectedProperty] = useState(null);
+  const [viewProperty, setViewProperty] = useState(null);
+  const [showBriefingModal, setShowBriefingModal] = useState(false);
+  const [briefingProperty, setBriefingProperty] = useState(null);
+  const [isPanelOpen, setIsPanelOpen] = useState(false);
+  const [panelWidth, setPanelWidth] = useState(400);
+  const [isResizing, setIsResizing] = useState(false);
+  const [contextMenu, setContextMenu] = useState({ show: false, x: 0, y: 0 });
+  const [selectedPropertyNos, setSelectedPropertyNos] = useState([]);
+  const [showTableSettings, setShowTableSettings] = useState(false);
+  const [tableColumns, setTableColumns] = useState([]);
+  const [openPropertyModalId, setOpenPropertyModalId] = useState(null); // 열려있는 물건 등록/수정 모달 ID 추적
+
+
+  // 모달 닫힘 이벤트 감지
+  useEffect(() => {
+    if (!window.electronAPI?.modal?.on) {
+      console.log('modal.on not available');
+      return;
+    }
+
+    console.log('Setting up modal closed listener');
+
+    // 모든 모달 닫힘 이벤트를 감지하여 ID 초기화 (Electron 메인 프로세스에서 전송)
+    const cleanup1 = window.electronAPI.modal.on('closed', ({ modalId }) => {
+      console.log('=== Modal closed event received ===');
+      console.log('Closed modal ID:', modalId);
+
+      // 함수형 업데이트를 사용하여 최신 state 값 사용
+      setOpenPropertyModalId((currentId) => {
+        console.log('Current openPropertyModalId in callback:', currentId);
+        if (modalId === currentId) {
+          console.log('Modal closed, resetting ID:', modalId);
+          fetchProperties();
+          return null;
+        } else {
+          console.log('Modal ID mismatch, not resetting');
+          return currentId;
+        }
+      });
+    });
+
+    // windowClosing 이벤트도 감지 (백업 방법 - 모달 창에서 직접 전송)
+    const cleanup2 = window.electronAPI.modal.on('windowClosing', ({ data }) => {
+      console.log('=== Modal windowClosing event received ===');
+      console.log('Closing modal ID:', data?.modalId);
+
+      // 함수형 업데이트를 사용하여 최신 state 값 사용
+      setOpenPropertyModalId((currentId) => {
+        console.log('Current openPropertyModalId in callback:', currentId);
+        if (data?.modalId === currentId) {
+          console.log('Modal closing, resetting ID:', data.modalId);
+          fetchProperties();
+          return null;
+        }
+        return currentId;
+      });
+    });
+
+    return () => {
+      cleanup1();
+      cleanup2();
+    };
+  }, []); // 의존성 배열 비움 - 한 번만 등록
+
+  // 시도 목록 로드
+  useEffect(() => {
+    loadSidoList();
+  }, []);
+
+  const loadSidoList = async () => {
+    try {
+      const data = await addressService.getSidoList();
+      setSidoList(data || []);
+    } catch (error) {
+      console.error('시도 목록 로드 실패:', error);
+    }
+  };
+
+  // 시도 변경 시 시군구 목록 로드
+  useEffect(() => {
+    if (searchFilters.sido) {
+      loadSigunguList(searchFilters.sido);
+    } else {
+      setSigunguList([]);
+      setEupMyeonDongList([]);
+    }
+  }, [searchFilters.sido]);
+
+  const loadSigunguList = async (sidoCode) => {
+    try {
+      const data = await addressService.getSigunguList(sidoCode);
+      setSigunguList(data || []);
+    } catch (error) {
+      console.error('시군구 목록 로드 실패:', error);
+    }
+  };
+
+  // 시군구 변경 시 읍면동 목록 로드
+  useEffect(() => {
+    if (searchFilters.sigungu) {
+      loadEupMyeonDongList(searchFilters.sigungu);
+    } else {
+      setEupMyeonDongList([]);
+      setRiList([]);
+    }
+  }, [searchFilters.sigungu]);
+
+  const loadEupMyeonDongList = async (sigunguCode) => {
+    try {
+      const data = await addressService.getEupMyeonDongList(sigunguCode);
+      setEupMyeonDongList(data || []);
+    } catch (error) {
+      console.error('읍면동 목록 로드 실패:', error);
+    }
+  };
+
+  // 읍면동 변경 시 리 목록 로드
+  useEffect(() => {
+    if (searchFilters.eupMyeonDong) {
+      loadRiList(searchFilters.eupMyeonDong);
+    } else {
+      setRiList([]);
+    }
+  }, [searchFilters.eupMyeonDong]);
+
+  const loadRiList = async (bjdCode) => {
+    try {
+      const data = await addressService.getRiList(bjdCode);
+      setRiList(data || []);
+    } catch (error) {
+      console.error('리 목록 로드 실패:', error);
+      setRiList([]);
+    }
+  };
+
+  // rowCount나 sortOrder 변경 시 페이지 초기화
+  useEffect(() => {
+    setPagination(prev => ({ ...prev, page: 1 }));
+  }, [rowCount, sortOrder]);
+
+  // API에서 물건 목록 조회 (searchFilters 제외 - 검색 버튼 클릭시에만 조회)
+  useEffect(() => {
+    fetchProperties();
+  }, [pagination.page, pagination.pageSize, selectedSummary, activeTab, rowCount, sortOrder]);
+
+  // 신규 물건 등록 이벤트 리스너
+  useEffect(() => {
+    const handleOpenPropertyModal = () => {
+      handleAddProperty();
+    };
+    window.addEventListener('openPropertyModal', handleOpenPropertyModal);
+    return () => window.removeEventListener('openPropertyModal', handleOpenPropertyModal);
+  }, []);
+
+  // 모달 이벤트 리스너
+  useEffect(() => {
+    if (!window.electronAPI?.modal) return;
+
+    // 모달에서 성공 이벤트 수신 시 목록 새로고침
+    const cleanupSuccess = window.electronAPI.modal.on('success', ({ modalId, type, data }) => {
+      if (type === 'property' || type === 'property-view') {
+        console.log('Property modal success:', data);
+        fetchProperties();
+      }
+    });
+
+    // 모달에서 edit 이벤트 수신 시 수정 모달 열기
+    const cleanupEdit = window.electronAPI.modal.on('edit', ({ modalId, type, data }) => {
+      if (type === 'property-view') {
+        console.log('Property edit requested:', data);
+        // 수정 모달 열기
+        window.electronAPI.modal.open({
+          type: 'property',
+          data: {
+            title: '물건 수정',
+            editData: data,
+          },
+          width: 1000,
+          height: 750,
+        });
+      }
+    });
+
+    return () => {
+      cleanupSuccess();
+      cleanupEdit();
+    };
+  }, []);
+
+  const fetchProperties = async () => {
+    try {
+      setLoading(true);
+
+      // 선택된 summary 기반으로 필터 파라미터 설정
+      const danjiCode = selectedSummary?.danjiCode || null;
+      const addr3 = selectedSummary?.addr3 || null;
+      const ptType = selectedSummary?.ptType || searchFilters.ptType || null;
+      // 매물유형 필터 (모든유형/매매/전세/월세/기타임대)
+      const saleDiv = searchFilters.saleDiv || null;
+
+      // 페이지 크기 결정 (전부/20줄/30줄)
+      const pageSize = rowCount === 'all' ? 9999 : parseInt(rowCount);
+
+      // 정렬 방식 파라미터
+      let orderBy = 'crt_dt'; // 기본값
+      if (sortOrder === 'modified') {
+        orderBy = 'upd_dt';
+      } else if (sortOrder === 'recent_reg') {
+        orderBy = 'crt_dt';
+      } else if (sortOrder === 'first_reg') {
+        orderBy = 'crt_dt';
+      }
+      const orderDirection = (sortOrder === 'recent_reg' || sortOrder === 'modified') ? 'DESC' : 'ASC';
+
+      // 선택된 지역들의 bjdCode 추출
+      const bjdCodes = selectedRegions.map(region => {
+        // eupMyeonDong, sigungu, sido 순으로 우선순위
+        return region.codes.eupMyeonDong || region.codes.sigungu || region.codes.sido;
+      }).filter(Boolean);
+
+      const response = await propertyService.getList(
+        null,
+        searchFilters.buildingName || searchFilters.keyword,
+        pagination.page,
+        pageSize,
+        ptType,
+        danjiCode,
+        addr3,
+        user?.offNo,  // 로그인한 사용자의 사무소 번호
+        user?.rtNo,   // 로그인한 사용자의 중개인 번호
+        saleDiv,      // 매물유형 필터
+        orderBy,      // 정렬 컬럼
+        orderDirection, // 정렬 방향
+        bjdCodes      // 선택된 지역 코드 배열
+      );
+
+      if (response?.data) {
+        // API 응답에서 물건 리스트 추출
+        const propertyList = response.data.ptSales || [];
+        setProperties(propertyList);
+        setPagination(prev => ({
+          ...prev,
+          pageSize: pageSize,
+          total: response.data.totalCount || propertyList.length,
+        }));
+
+        // 요약 정보 업데이트
+        setSummaries(response.data.summaries || []);
+        setProgressCount(response.data.progressCount || 0);
+      } else {
+        // 데이터가 없거나 에러인 경우 목록 비우기
+        setProperties([]);
+        setPagination(prev => ({
+          ...prev,
+          total: 0,
+        }));
+        setSummaries([]);
+        setProgressCount(0);
+      }
+    } catch (error) {
+      console.error('물건 목록 조회 실패:', error);
+      // 에러 발생 시에도 목록 비우기
+      setProperties([]);
+      setPagination(prev => ({
+        ...prev,
+        total: 0,
+      }));
+      setSummaries([]);
+      setProgressCount(0);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 물건 요약 클릭 핸들러
+  const handleSummaryClick = (summary) => {
+    if (!summary) {
+      // null이면 필터 해제
+      setSelectedSummary(null);
+    } else if (selectedSummary?.groupKey === summary.groupKey) {
+      // 같은 요약을 다시 클릭하면 필터 해제
+      setSelectedSummary(null);
+    } else {
+      setSelectedSummary(summary);
+    }
+    setPagination(prev => ({ ...prev, page: 1 })); // 페이지 초기화
+  };
+
+  // 클라이언트 측 필터링 제거 - 모든 필터링은 서버에서 처리
+  const filteredProperties = useMemo(() => {
+    return properties;
+  }, [properties]);
+
+  const handleFilterChange = (field, value) => {
+    setSearchFilters(prev => ({ ...prev, [field]: value }));
+  };
+
+  // 매물유형 토글 핸들러 (복수선택 가능)
+  const handleSaleDivToggle = (value) => {
+    if (!value) {
+      // "모든유형" 클릭
+      setSearchFilters(prev => ({ ...prev, saleDiv: '' }));
+      return;
+    }
+
+    const currentSaleDivs = searchFilters.saleDiv
+      ? searchFilters.saleDiv.split(',').filter(v => v)
+      : [];
+
+    const index = currentSaleDivs.indexOf(value);
+    let newSaleDivs;
+
+    if (index > -1) {
+      // 이미 선택되어 있으면 제거
+      newSaleDivs = currentSaleDivs.filter(v => v !== value);
+    } else {
+      // 선택되어 있지 않으면 추가
+      newSaleDivs = [...currentSaleDivs, value];
+    }
+
+    setSearchFilters(prev => ({ ...prev, saleDiv: newSaleDivs.join(',') }));
+  };
+
+  // 매물유형 선택 체크
+  const isSaleDivSelected = (value) => {
+    if (!searchFilters.saleDiv) return false;
+    const selected = searchFilters.saleDiv.split(',').filter(v => v);
+    return selected.includes(value);
+  };
+
+  // 지역 추가 핸들러
+  const handleAddRegion = () => {
+    const { sido, sigungu, eupMyeonDong } = searchFilters;
+    if (!sido && !sigungu && !eupMyeonDong) return;
+
+    // 주소명 찾기
+    const sidoName = sidoList.find(s => s.bjdCode === sido)?.bjdName || '';
+    const sigunguName = sigunguList.find(s => s.bjdCode === sigungu)?.bjdName || '';
+    const eupMyeonDongName = eupMyeonDongList.find(e => e.bjdCode === eupMyeonDong)?.bjdName || '';
+
+    const regionText = [sidoName, sigunguName, eupMyeonDongName].filter(Boolean).join(' ');
+    const regionCodes = { sido, sigungu, eupMyeonDong };
+
+    // 중복 체크 (동일한 조합이 이미 있는지)
+    const isDuplicate = selectedRegions.some(
+      r => r.codes.sido === sido && r.codes.sigungu === sigungu && r.codes.eupMyeonDong === eupMyeonDong
+    );
+
+    if (regionText && !isDuplicate) {
+      setSelectedRegions([...selectedRegions, { text: regionText, codes: regionCodes }]);
+      // 드롭다운 초기화
+      setSearchFilters(prev => ({ ...prev, sido: '', sigungu: '', eupMyeonDong: '' }));
+    }
+  };
+
+  // 지역 삭제 핸들러
+  const handleRemoveRegion = (index) => {
+    setSelectedRegions(selectedRegions.filter((_, idx) => idx !== index));
+  };
+
+  const handleResetFilters = () => {
+    setSearchFilters({
+      sido: '',
+      sigungu: '',
+      eupMyeonDong: '',
+      prgSts: '',
+      saleDiv: '',
+      priceMin: '',
+      priceMax: '',
+      areaMin: '',
+      areaMax: '',
+      memo: '',
+      buildingName: '',
+      ptType: '',
+    });
+    setSelectedRegions([]);
+    setSelectedSummary(null);
+  };
+
+
+  const formatPrice = (price) => {
+    if (!price) return '-';
+    if (price >= 10000) {
+      return `${(price / 10000).toFixed(1)}억`;
+    }
+    return `${price.toLocaleString()}만`;
+  };
+
+  // 물건 등록 버튼 클릭 - 새 창으로 열기
+  const handleAddProperty = async () => {
+    console.log('=== handleAddProperty called ===');
+    console.log('Current openPropertyModalId:', openPropertyModalId);
+
+    if (window.electronAPI?.modal) {
+      try {
+        // 기존 모달이 있으면 무조건 닫기
+        if (openPropertyModalId) {
+          console.log('=== Closing existing modal before opening new one ===');
+          try {
+            await window.electronAPI.modal.close(openPropertyModalId);
+            setOpenPropertyModalId(null); // 즉시 초기화
+          } catch (e) {
+            console.log('기존 모달 닫기 실패 (이미 닫혔을 수 있음):', e);
+          }
+        }
+
+        // 항상 새 창으로 열기
+        const modalId = await window.electronAPI.modal.open({
+          type: 'property-form',
+          data: {
+            title: '물건 등록',
+          },
+          width: 1200,
+          height: 800,
+        });
+
+        console.log('New property modal opened:', modalId);
+        // 새로 열린 모달 ID 저장
+        setOpenPropertyModalId(modalId);
+      } catch (error) {
+        console.error('Failed to open modal:', error);
+        // Fallback: 기존 모달 방식
+        setEditPropertyData(null);
+        setShowPropertyModal(true);
+      }
+    } else {
+      // 웹 환경: 기존 모달 방식
+      setEditPropertyData(null);
+      setShowPropertyModal(true);
+    }
+  };
+
+  const handleAddPropertyV2 = async () => {
+    console.log('=== handleAddPropertyV2 called ===');
+    console.log('Current openPropertyModalId:', openPropertyModalId);
+
+    if (window.electronAPI?.modal) {
+      try {
+        // 기존 모달이 있으면 무조건 닫기
+        if (openPropertyModalId) {
+          console.log('=== Closing existing modal before opening new one ===');
+          try {
+            await window.electronAPI.modal.close(openPropertyModalId);
+            setOpenPropertyModalId(null); // 즉시 초기화
+          } catch (e) {
+            console.log('기존 모달 닫기 실패 (이미 닫혔을 수 있음):', e);
+          }
+        }
+
+        // 항상 새 창으로 열기
+        const modalId = await window.electronAPI.modal.open({
+          type: 'property-form-v2',
+          data: {
+            title: '물건 등록 V2',
+          },
+          width: 1400,
+          height: 900,
+          minWidth: 1400,
+          minHeight: 900,
+          resizable: true,
+        });
+
+        console.log('New property modal V2 opened:', modalId);
+        // 새로 열린 모달 ID 저장
+        setOpenPropertyModalId(modalId);
+      } catch (error) {
+        console.error('Failed to open modal V2:', error);
+        // Fallback: 기존 모달 방식
+        setEditPropertyData(null);
+        setShowPropertyModal(true);
+      }
+    } else {
+      // 웹 환경: 기존 모달 방식
+      setEditPropertyData(null);
+      setShowPropertyModal(true);
+    }
+  };
+
+  // 수정 버튼 클릭 - 새 창으로 열기
+  const handleEdit = async (property) => {
+    if (window.electronAPI?.modal) {
+      try {
+        // 이미 열려있는 물건 모달이 있으면 데이터만 업데이트
+        if (openPropertyModalId && window.electronAPI.modal.updateData) {
+          try {
+            await window.electronAPI.modal.updateData(openPropertyModalId, {
+              title: `물건 수정 - ${property.ptName || '물건정보'}`,
+              ptNo: property.ptNo,
+            });
+            // 창에 포커스
+            if (window.electronAPI.modal.focus) {
+              await window.electronAPI.modal.focus(openPropertyModalId);
+            }
+            return; // 새 창을 열지 않고 종료
+          } catch (e) {
+            console.log('기존 모달 업데이트 실패, 새 창을 엽니다:', e);
+            // 업데이트 실패하면 기존 창 닫고 새로 열기
+            try {
+              await window.electronAPI.modal.close(openPropertyModalId);
+            } catch (closeError) {
+              console.log('기존 모달 닫기 실패:', closeError);
+            }
+          }
+        }
+
+        const modalId = await window.electronAPI.modal.open({
+          type: 'property-form',
+          data: {
+            title: `물건 수정 - ${property.ptName || '물건정보'}`,
+            ptNo: property.ptNo,
+          },
+          width: 1200,
+          height: 800,
+        });
+
+        // 새로 열린 모달 ID 저장
+        setOpenPropertyModalId(modalId);
+      } catch (error) {
+        console.error('Failed to open modal:', error);
+        // Fallback: 기존 모달 방식
+        setEditPropertyData(property);
+        setShowPropertyModal(true);
+      }
+    } else {
+      // 웹 환경: 기존 모달 방식
+      setEditPropertyData(property);
+      setShowPropertyModal(true);
+    }
+  };
+
+  // 엑셀 업로드 버튼 클릭
+  const handleExcelUpload = async () => {
+    if (window.electronAPI?.modal) {
+      try {
+        await window.electronAPI.modal.open({
+          type: 'data-upload',
+          data: {
+            title: '데이터 업로드',
+          },
+          width: 1000,
+          height: 700,
+        });
+      } catch (error) {
+        console.error('Failed to open data upload modal:', error);
+        toast.error('엑셀 업로드 창을 열 수 없습니다.');
+      }
+    } else {
+      toast.error('Electron 환경에서만 사용 가능합니다.');
+    }
+  };
+
+  // 삭제 버튼 클릭
+  const handleDelete = async (ptNo) => {
+    if (!window.confirm('이 물건을 삭제하시겠습니까?')) {
+      return;
+    }
+
+    try {
+      await propertyService.delete(ptNo, user?.userId);
+      toast.success('물건이 삭제되었습니다.');
+      fetchProperties();
+    } catch (error) {
+      console.error('물건 삭제 실패:', error);
+      toast.error('물건 삭제에 실패했습니다.');
+    }
+  };
+
+  // 선택 삭제 핸들러
+  const handleDeleteSelected = async () => {
+    if (selectedPropertyNos.length === 0) {
+      toast.error('삭제할 물건을 선택해주세요.');
+      return;
+    }
+
+    if (!window.confirm(`선택한 ${selectedPropertyNos.length}개의 물건을 삭제하시겠습니까?`)) {
+      return;
+    }
+
+    try {
+      // 각 물건을 순차적으로 삭제
+      let successCount = 0;
+      let failCount = 0;
+
+      for (const ptNo of selectedPropertyNos) {
+        try {
+          await propertyService.delete(ptNo, user?.userId);
+          successCount++;
+        } catch (error) {
+          console.error(`물건 ${ptNo} 삭제 실패:`, error);
+          failCount++;
+        }
+      }
+
+      if (successCount > 0) {
+        toast.success(`${successCount}개의 물건이 삭제되었습니다.${failCount > 0 ? ` (실패: ${failCount}개)` : ''}`);
+      }
+      if (failCount > 0 && successCount === 0) {
+        toast.error('물건 삭제에 실패했습니다.');
+      }
+
+      // 선택 초기화 및 목록 새로고침
+      setSelectedPropertyNos([]);
+      fetchProperties();
+    } catch (error) {
+      console.error('물건 삭제 실패:', error);
+      toast.error('물건 삭제에 실패했습니다.');
+    }
+  };
+
+  // 모달 성공 콜백
+  const handleModalSuccess = () => {
+    fetchProperties();
+  };
+
+  // 물건 행 클릭 핸들러 - 수정 페이지로 이동
+  const handleRowClick = async (property) => {
+    console.log('Row clicked:', property);
+
+    if (window.electronAPI?.modal) {
+      // Electron 환경: 새 창으로 수정 모달 열기
+      try {
+        // 이미 열려있는 물건 모달이 있으면 데이터만 업데이트
+        if (openPropertyModalId && window.electronAPI.modal.updateData) {
+          try {
+            console.log('=== Updating existing modal (Row Click) ===');
+            console.log('Modal ID:', openPropertyModalId);
+            console.log('New ptNo:', property.ptNo);
+
+            await window.electronAPI.modal.updateData(openPropertyModalId, {
+              title: `물건 수정 - ${property.ptName || '물건정보'}`,
+              ptNo: property.ptNo,
+            });
+
+            console.log('Modal data updated successfully');
+
+            // 창에 포커스
+            if (window.electronAPI.modal.focus) {
+              await window.electronAPI.modal.focus(openPropertyModalId);
+            }
+            return; // 새 창을 열지 않고 종료
+          } catch (e) {
+            console.log('기존 모달 업데이트 실패, 새 창을 엽니다:', e);
+            // 업데이트 실패하면 기존 창 닫고 새로 열기
+            try {
+              await window.electronAPI.modal.close(openPropertyModalId);
+            } catch (closeError) {
+              console.log('기존 모달 닫기 실패:', closeError);
+            }
+          }
+        }
+
+        const modalId = await window.electronAPI.modal.open({
+          type: 'property-form',
+          data: {
+            title: `물건 수정 - ${property.ptName || '물건정보'}`,
+            ptNo: property.ptNo,
+          },
+          width: 1200,
+          height: 800,
+        });
+        console.log('Property form modal opened:', modalId);
+
+        // 새로 열린 모달 ID 저장
+        setOpenPropertyModalId(modalId);
+      } catch (error) {
+        console.error('Failed to open modal:', error);
+        // Fallback: 페이지 이동
+        window.location.href = `/properties/edit/${property.ptNo}`;
+      }
+    } else {
+      // 웹 환경: 페이지 이동
+      window.location.href = `/properties/edit/${property.ptNo}`;
+    }
+  };
+
+  // 패널 토글
+  const togglePanel = () => {
+    setIsPanelOpen(!isPanelOpen);
+  };
+
+  // 리사이저 마우스 다운
+  const handleMouseDown = (e) => {
+    e.preventDefault();
+    setIsResizing(true);
+  };
+
+  // 리사이저 마우스 이동
+  useEffect(() => {
+    const handleMouseMove = (e) => {
+      if (!isResizing) return;
+
+      const container = document.querySelector('.prop-content-wrapper');
+      if (!container) return;
+
+      const containerRect = container.getBoundingClientRect();
+      const newWidth = containerRect.right - e.clientX;
+
+      // 최소 300px, 최대 800px
+      if (newWidth >= 300 && newWidth <= 800) {
+        setPanelWidth(newWidth);
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsResizing(false);
+    };
+
+    if (isResizing) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+    }
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizing]);
+
+  // 전체 테이블 컬럼 정의 (기본 표시 컬럼 + 추가 가능한 컬럼)
+  const allTableColumns = [
+    // 기본 표시 컬럼 (defaultTableColumns)
+    { key: 'checkbox', label: '선택', width: 50 },
+    { key: 'actions_quick', label: '퀵메뉴', width: 100 },
+    { key: 'address', label: '주소/기타주소(지번)', width: 200, subHeaders: ['주소', '기타주소(지번)'] },
+    { key: 'dong_ho', label: '동/호', width: 100, subHeaders: ['동', '호'] },
+    { key: 'type_area', label: '타입/전용면적', width: 120, subHeaders: ['타입', '전용면적'] },
+    { key: 'trade_type', label: '거래유형', width: 90 },
+    { key: 'trade_amount', label: '거래금액', width: 120 },
+    { key: 'owner_buyer', label: '소유자/임차인', width: 110, subHeaders: ['소유자', '임차인'] },
+    { key: 'phone', label: '전화번호', width: 140, subHeaders: ['소유자 전화번호', '임차인 전화번호'] },
+    { key: 'status_date', label: '현상태/잔금예정일', width: 130, subHeaders: ['현상태', '잔금예정일'] },
+    { key: 'room_bath', label: '방개수/욕실수', width: 100, subHeaders: ['방개수', '욕실수'] },
+    { key: 'rental', label: '임대사업자/갱신권', width: 180, subHeaders: ['주택임대사업자', '계약갱신청구권'] },
+    { key: 'pet', label: '반려동물', width: 80 },
+    { key: 'land_building', label: '용도지역/건축물용도', width: 150, subHeaders: ['용도지역', '건축물용도'] },
+    { key: 'category', label: '지목/제한사항', width: 150, subHeaders: ['지목', '기타제한사항'] },
+    { key: 'business_info', label: '업종/상호', width: 120, subHeaders: ['업종', '상호'] },
+    { key: 'date_info', label: '수정일/등록일', width: 120, subHeaders: ['수정일', '등록일'] },
+    { key: 'description', label: '물건특징', width: 150 },
+
+    // 추가 가능한 개별 컬럼들
+    { key: 'ptNo', label: '물건번호', width: 100 },
+    { key: 'prgSts', label: '진행상태', width: 90 },
+    { key: 'ptSts', label: '물건상태', width: 90 },
+    { key: 'ptType', label: '물건종류', width: 100 },
+    { key: 'ptName', label: '물건명', width: 150 },
+    { key: 'danjiCode', label: '단지코드', width: 100 },
+    { key: 'floor', label: '층', width: 60 },
+    { key: 'top', label: '탑', width: 60 },
+    { key: 'supArea', label: '공급면적', width: 90 },
+    { key: 'landShare', label: '대지지분', width: 90 },
+    { key: 'dirStd', label: '방향', width: 70 },
+    { key: 'heatMethod', label: '난방방식', width: 90 },
+    { key: 'heatFuel', label: '난방연료', width: 90 },
+    { key: 'balcExt', label: '발코니확장', width: 90 },
+    { key: 'pkCnt', label: '주차대수', width: 80 },
+    { key: 'maintCost', label: '관리비', width: 90 },
+    { key: 'nowDepAmt', label: '현보증금', width: 110 },
+    { key: 'nowMonAmt', label: '현월차임', width: 90 },
+    { key: 'loanAmt', label: '융자금', width: 110 },
+    { key: 'loanAmtAft', label: '잔금후융자', width: 110 },
+    { key: 'mvnPsbYn', label: '입주가능', width: 90 },
+    { key: 'mtryDate', label: '만기일', width: 100 },
+    { key: 'exptMovDate', label: '이사예정일', width: 100 },
+    { key: 'compYear', label: '사용승인일', width: 90 },
+    { key: 'opt', label: '옵션', width: 100 },
+    { key: 'cnNo', label: '계약번호', width: 90 },
+    { key: 'cnDt', label: '계약일', width: 100 },
+    { key: 'cnType', label: '거래종류', width: 90 },
+    { key: 'cnAmt', label: '계약금', width: 100 },
+    { key: 'midAmt', label: '중도금', width: 100 },
+    { key: 'rmdAmt', label: '잔금', width: 100 },
+    { key: 'ptMemo', label: '메모', width: 150 },
+    { key: 'crtDt', label: '등록일', width: 100 },
+    { key: 'updDt', label: '수정일', width: 100 },
+  ];
+
+  // 기본 표시 컬럼 (헤더 2행: 첫행 / 앞, 둘째행 / 뒤, rowspan 2는 같은 텍스트)
+  const defaultTableColumns = [
+    { key: 'checkbox', label: '선택', width: 50 },
+    { key: 'actions_quick', label: '퀵메뉴', width: 100 }, // rowspan 2
+    { key: 'address', label: '주소', width: 200, subHeaders: ['주소', '기타주소(지번)'] },
+    { key: 'dong_ho', label: '동', width: 100, subHeaders: ['동', '호'] },
+    { key: 'type_area', label: '타입', width: 120, subHeaders: ['타입', '전용면적'] },
+    { key: 'trade_type', label: '거래유형', width: 90 }, // rowspan 2
+    { key: 'trade_amount', label: '거래금액', width: 120 }, // rowspan 2
+    { key: 'owner_buyer', label: '소유자', width: 110, subHeaders: ['소유자', '임차인'] },
+    { key: 'phone', label: '소유자 전화번호', width: 140, subHeaders: ['소유자 전화번호', '임차인 전화번호'] },
+    { key: 'status_date', label: '현상태', width: 130, subHeaders: ['현상태', '잔금예정일'] },
+    { key: 'room_bath', label: '방개수', width: 100, subHeaders: ['방개수', '욕실수'] },
+    { key: 'rental', label: '주택임대사업자', width: 180, subHeaders: ['주택임대사업자', '계약갱신청구권'] },
+    { key: 'pet', label: '반려동물', width: 80 }, // rowspan 2
+    { key: 'land_building', label: '용도지역', width: 150, subHeaders: ['용도지역', '건축물용도'] },
+    { key: 'category', label: '지목', width: 150, subHeaders: ['지목', '기타제한사항'] },
+    { key: 'business_info', label: '업종', width: 120, subHeaders: ['업종', '상호'] },
+    { key: 'date_info', label: '수정일', width: 120, subHeaders: ['수정일', '등록일'] },
+    { key: 'description', label: '물건특징', width: 150 }, // rowspan 2
+  ];
+
+  // 구분 라벨 (매/전/월/기임)
+  const getSaleDivLabel = (saleDiv) => {
+    if (!saleDiv) return '-';
+
+    const labels = {
+      'SALEDIV01': '매매',
+      'SALEDIV02': '전세',
+      'SALEDIV03': '월세',
+      'SALEDIV04': '기타임대',
+    };
+
+    // 쉼표로 구분된 복수 값 처리
+    if (saleDiv.includes(',')) {
+      return saleDiv.split(',')
+        .map(div => labels[div.trim()] || div.trim())
+        .join('\n');
+    }
+
+    return labels[saleDiv] || saleDiv;
+  };
+
+  // 정보망 전송 핸들러
+  const handleTransfer = async (property) => {
+    // Electron API를 통해 별도 창으로 열기
+    if (window.electronAPI?.modal) {
+      try {
+        await window.electronAPI.modal.open({
+          type: 'hub-form',
+          data: {
+            title: '거래정보 등록',
+            tradeDiv: 'PT',
+            propertyData: property,
+            ptNo: property.ptNo, // 물건번호 전달
+          },
+          width: 1200,
+          height: 800,
+        });
+      } catch (error) {
+        console.error('거래정보 등록 창 열기 실패:', error);
+        // fallback to modal
+        openWithProperty(property);
+      }
+    } else {
+      // Electron API 없으면 기존 방식 사용
+      openWithProperty(property);
+    }
+  };
+
+  // 테이블 셀 렌더링 (subHeaderIndex: 0=첫번째 행, 1=두번째 행)
+  const renderTableCell = (property, column, subHeaderIndex) => {
+    switch (column.key) {
+      case 'checkbox':
+        return (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+            <input
+              type="checkbox"
+              checked={selectedPropertyNos.includes(property.ptNo)}
+              onChange={(e) => {
+                e.stopPropagation();
+                if (e.target.checked) {
+                  setSelectedPropertyNos([...selectedPropertyNos, property.ptNo]);
+                } else {
+                  setSelectedPropertyNos(selectedPropertyNos.filter(no => no !== property.ptNo));
+                }
+              }}
+              className="w-4 h-4 cursor-pointer"
+            />
+          </div>
+        );
+
+      case 'actions_quick':
+        return (
+          <div className="flex flex-col gap-1" style={{ width: '100%' }}>
+            {/* 세 버튼 모두 세로 배치 */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                handleTransfer(property);
+              }}
+              className="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 whitespace-nowrap"
+              style={{ width: '100%' }}
+            >
+              정보망전송
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                toast.info('보고서 작성 기능은 준비 중입니다.');
+              }}
+              className="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700 whitespace-nowrap"
+              style={{ width: '100%' }}
+            >
+              보고서작성
+            </button>
+            <button
+              onClick={async (e) => {
+                e.stopPropagation();
+
+                // 이미 진행중인 물건인지 확인
+                if (property.ptSts === 'PTSTS01') {
+                  toast.error('이미 진행중인 물건입니다.');
+                  return;
+                }
+
+                // 확인 대화상자
+                const confirmed = window.confirm('해당 물건을 진행중으로 변경하시겠습니까?');
+                if (!confirmed) return;
+
+                try {
+                  await propertyService.updateStatus(property.ptNo, 'PTSTS01', user?.userId);
+                  toast.success('물건이 진행중으로 변경되었습니다.');
+                  // 목록 새로고침
+                  fetchProperties();
+                } catch (error) {
+                  console.error('물건 상태 변경 실패:', error);
+                  toast.error('물건 상태 변경에 실패했습니다.');
+                }
+              }}
+              className="px-2 py-1 text-xs bg-orange-600 text-white rounded hover:bg-orange-700 whitespace-nowrap"
+              style={{ width: '100%' }}
+            >
+              진행물건
+            </button>
+          </div>
+        );
+
+      // ========== subHeader 있는 컬럼들 (2행 구조) ==========
+      case 'address':
+        if (subHeaderIndex === 0) {
+          // 주소
+          const addressLine = [property.addr1, property.addr2, property.addr3].filter(Boolean).join(' ');
+          return <div style={{ fontSize: '13px' }}>{addressLine || '-'}</div>;
+        } else {
+          // 기타주소(지번)
+          const addrDetail = property.addr4 || property.addr5 || property.ptName;
+          return <div style={{ fontSize: '13px' }}>{addrDetail || '-'}</div>;
+        }
+
+      case 'dong_ho':
+        if (subHeaderIndex === 0) {
+          return <div style={{ fontSize: '13px', textAlign: 'center' }}>{property.dong || '-'}</div>;
+        } else {
+          return <div style={{ fontSize: '13px', textAlign: 'center' }}>{property.ho || '-'}</div>;
+        }
+
+      case 'type_area':
+        if (subHeaderIndex === 0) {
+          return <div style={{ fontSize: '13px', textAlign: 'center' }}>{property.aptTyp || '-'}</div>;
+        } else {
+          return <div style={{ fontSize: '13px', textAlign: 'right' }}>{property.excArea ? `${property.excArea}㎡` : '-'}</div>;
+        }
+
+      case 'trade_type':
+        // 4. 거래유형 (rowspan 2 효과)
+        return (
+          <div style={{ fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', whiteSpace: 'pre-line' }}>
+            {getSaleDivLabel(property.saleDiv)}
+          </div>
+        );
+
+      case 'trade_amount':
+        // 5. 거래금액 - 매매가, 전세가, 보증금/월세 모두 표시 (한글 포맷)
+        const amounts = [];
+
+        if (property.saleAmt) {
+          amounts.push(formatKoreanAmount(property.saleAmt));
+        }
+        if (property.lesAmt) {
+          amounts.push(formatKoreanAmount(property.lesAmt));
+        }
+        if (property.protAmt || property.monAmt) {
+          const prot = formatKoreanAmount(property.protAmt);
+          const mon = formatKoreanAmount(property.monAmt);
+          amounts.push(`${prot}/${mon}`);
+        }
+
+        return (
+          <div style={{
+            fontSize: '13px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            height: '100%',
+            whiteSpace: 'pre-line',
+            lineHeight: '1.4'
+          }}>
+            {amounts.length > 0 ? amounts.join('\n') : '-'}
+          </div>
+        );
+
+      case 'owner_buyer':
+        const owners = property.holders?.filter(h => h.holderType === 'OWNER') || [];
+        const buyers = property.holders?.filter(h => h.holderType === 'BUYER') || [];
+        if (subHeaderIndex === 0) {
+          return <div style={{ fontSize: '13px' }}>{owners.length > 0 ? owners.map(o => o.holderName).join(', ') : '-'}</div>;
+        } else {
+          return <div style={{ fontSize: '13px' }}>{buyers.length > 0 ? buyers.map(b => b.holderName).join(', ') : '-'}</div>;
+        }
+
+      case 'phone':
+        const ownersWithPhone = property.holders?.filter(h => h.holderType === 'OWNER') || [];
+        const buyersWithPhone = property.holders?.filter(h => h.holderType === 'BUYER') || [];
+        if (subHeaderIndex === 0) {
+          return <div style={{ fontSize: '13px' }}>{ownersWithPhone.length > 0 ? ownersWithPhone.map(o => o.holderPhone).filter(Boolean).join(', ') : '-'}</div>;
+        } else {
+          return <div style={{ fontSize: '13px' }}>{buyersWithPhone.length > 0 ? buyersWithPhone.map(b => b.holderPhone).filter(Boolean).join(', ') : '-'}</div>;
+        }
+
+      case 'status_date':
+        if (subHeaderIndex === 0) {
+          return <div style={{ fontSize: '13px' }}>{property.currentStatus || '-'}</div>;
+        } else {
+          return <div style={{ fontSize: '13px' }}>{property.rmdDate ? new Date(property.rmdDate).toLocaleDateString() : '-'}</div>;
+        }
+
+      case 'room_bath':
+        if (subHeaderIndex === 0) {
+          return <div style={{ fontSize: '13px', textAlign: 'center' }}>{property.roomCnt || '-'}</div>;
+        } else {
+          return <div style={{ fontSize: '13px', textAlign: 'center' }}>{property.bathCnt || '-'}</div>;
+        }
+
+      case 'rental':
+        if (subHeaderIndex === 0) {
+          return <div style={{ fontSize: '13px' }}>{property.houseRental || '-'}</div>;
+        } else {
+          return <div style={{ fontSize: '13px' }}>{property.contractRenewalRight || '-'}</div>;
+        }
+
+      case 'pet':
+        // 11. 반려동물 (rowspan 2 효과)
+        return (
+          <div style={{ fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+            {property.petYn === 'Y' ? '가능' : '불가'}
+          </div>
+        );
+
+      case 'land_building':
+        if (subHeaderIndex === 0) {
+          return <div style={{ fontSize: '13px' }} className="truncate">{property.landUse || '-'}</div>;
+        } else {
+          const buildingUseLabel = property.buildingUse
+            ? BUILDING_USES.find(u => u.code === property.buildingUse)?.label || property.buildingUse
+            : '-';
+          return <div style={{ fontSize: '13px' }} className="truncate">{buildingUseLabel}</div>;
+        }
+
+      case 'category':
+        if (subHeaderIndex === 0) {
+          return <div style={{ fontSize: '13px' }}>{property.landCategory || '-'}</div>;
+        } else {
+          return <div style={{ fontSize: '13px' }} className="truncate">{property.otherRestrictions || '-'}</div>;
+        }
+
+      case 'business_info':
+        if (subHeaderIndex === 0) {
+          return <div style={{ fontSize: '13px' }}>{property.businessType || '-'}</div>;
+        } else {
+          return <div style={{ fontSize: '13px' }}>{property.businessName || '-'}</div>;
+        }
+
+      case 'date_info':
+        const formatDate = (dateStr) => {
+          if (!dateStr) return '-';
+          const date = new Date(dateStr);
+          return date.toLocaleDateString('ko-KR', { year: '2-digit', month: '2-digit', day: '2-digit' }).replace(/\. /g, '-').replace('.', '');
+        };
+        if (subHeaderIndex === 0) {
+          return <div style={{ fontSize: '13px' }}>{formatDate(property.updDt)}</div>;
+        } else {
+          return <div style={{ fontSize: '13px' }}>{formatDate(property.crtDt)}</div>;
+        }
+
+      case 'description':
+        // 14. 물건특징 (rowspan 2 효과)
+        return (
+          <div style={{ fontSize: '13px', display: 'flex', alignItems: 'center', height: '100%' }}>
+            <span className="line-clamp-2">{property.ptExpl || '-'}</span>
+          </div>
+        );
+      // ========== 2줄 조합 컬럼들 끝 ==========
+      case 'ptNo':
+        return property.ptNo || '-';
+      case 'prgSts':
+        const prgStsLabels = {
+          'PRGSTS01': '대기',
+          'PRGSTS02': '진행',
+          'PRGSTS03': '보류',
+          'PRGSTS04': '완료',
+          'PRGSTS05': '취소',
+        };
+        return prgStsLabels[property.prgSts] || property.prgSts || '-';
+      case 'ptSts':
+        return property.ptSts || '-';
+      case 'houseRental':
+        return property.houseRental === 'Y' ? '가' : '부';
+      case 'petYn':
+        return property.petYn === 'Y' ? '가' : '부';
+      case 'region':
+        const address = [property.addr1, property.addr2, property.addr3].filter(Boolean).join(' ');
+        return <div className="text-sm max-w-xs truncate">{address || '-'}</div>;
+      case 'ptType':
+        return getPropertyTypeLabel(property.ptType) || '-';
+      case 'ptName':
+        return property.ptName || '-';
+      case 'danjiCode':
+        return property.danjiCode || '-';
+      case 'dong':
+        return property.dong || '-';
+      case 'ho':
+        return property.ho || '-';
+      case 'floor':
+        return property.floor || '-';
+      case 'top':
+        return property.top || '-';
+      case 'aptTyp':
+        return property.aptTyp || '-';
+      case 'areas':
+        return (
+          <div className="flex flex-col text-xs">
+            <span className="text-gray-600">공급: {property.supArea ? property.supArea.toFixed(2) : '-'}</span>
+            <span className="text-gray-600">전용: {property.excArea ? property.excArea.toFixed(2) : '-'}</span>
+          </div>
+        );
+      case 'supArea':
+        return property.supArea ? property.supArea.toFixed(2) : '-';
+      case 'excArea':
+        return property.excArea ? property.excArea.toFixed(2) : '-';
+      case 'landShare':
+        return property.landShare ? property.landShare.toFixed(2) : '-';
+      case 'roomCnt':
+        return property.roomCnt || '-';
+      case 'bathCnt':
+        return property.bathCnt || '-';
+      case 'dirStd':
+        return property.dirStd || '-';
+      case 'heatMethod':
+        return property.heatMethod || '-';
+      case 'heatFuel':
+        return property.heatFuel || '-';
+      case 'balcExt':
+        return property.balcExt === 'Y' ? '확장' : '미확장';
+      case 'pkCnt':
+        return property.pkCnt || '-';
+      case 'maintCost':
+        return property.maintCost ? `${property.maintCost.toLocaleString()}원` : '-';
+      case 'saleDiv':
+        return getSaleDivLabel(property.saleDiv);
+      case 'saleAmt':
+        return <span className="font-medium text-indigo-600">{formatPrice(property.saleAmt)}</span>;
+      case 'lesAmt':
+        return <span className="font-medium text-purple-600">{formatPrice(property.lesAmt)}</span>;
+      case 'protAmt':
+        return <span className="font-medium text-blue-600">{formatPrice(property.protAmt)}</span>;
+      case 'monAmt':
+        return <span className="font-medium text-green-600">{formatPrice(property.monAmt)}</span>;
+      case 'etcAmt':
+        return formatPrice(property.etcAmt);
+      case 'nowDepAmt':
+        return formatPrice(property.nowDepAmt);
+      case 'nowMonAmt':
+        return formatPrice(property.nowMonAmt);
+      case 'loanAmt':
+        return formatPrice(property.loanAmt);
+      case 'loanAmtAft':
+        return formatPrice(property.loanAmtAft);
+      case 'mvnPsbYn':
+        return property.mvnPsbYn === 'Y' ? '즉시입주' : '협의';
+      case 'mtryDate':
+        return property.mtryDate ? new Date(property.mtryDate).toLocaleDateString() : '-';
+      case 'exptMovDate':
+        return property.exptMovDate ? new Date(property.exptMovDate).toLocaleDateString() : '-';
+      case 'compYear':
+        return property.compYear || '-';
+      case 'opt':
+        return <span className="max-w-xs truncate block text-sm">{property.opt || '-'}</span>;
+      case 'cnNo':
+        return property.cnNo || '-';
+      case 'cnDt':
+        return property.cnDt ? new Date(property.cnDt).toLocaleDateString() : '-';
+      case 'cnType':
+        return property.cnType || '-';
+      case 'tradeAmt':
+        return <span className="font-medium text-red-600">{formatPrice(property.tradeAmt)}</span>;
+      case 'cnAmt':
+        return formatPrice(property.cnAmt);
+      case 'midAmt':
+        return formatPrice(property.midAmt);
+      case 'rmdAmt':
+        return formatPrice(property.rmdAmt);
+      case 'owner':
+        // holders 배열에서 OWNER 타입 찾기
+        const ownersList = property.holders?.filter(h => h.holderType === 'OWNER') || [];
+        return ownersList.length > 0 ? ownersList.map(o => o.holderName).join(', ') : '-';
+      case 'ownerPhone':
+        const ownerPhoneList = property.holders?.filter(h => h.holderType === 'OWNER') || [];
+        return ownerPhoneList.length > 0 ? ownerPhoneList.map(o => o.holderPhone).filter(Boolean).join(', ') : '-';
+      case 'buyer':
+        // holders 배열에서 BUYER 타입 찾기
+        const buyersList = property.holders?.filter(h => h.holderType === 'BUYER') || [];
+        return buyersList.length > 0 ? buyersList.map(b => b.holderName).join(', ') : '-';
+      case 'buyerPhone':
+        const buyerPhoneList = property.holders?.filter(h => h.holderType === 'BUYER') || [];
+        return buyerPhoneList.length > 0 ? buyerPhoneList.map(b => b.holderPhone).filter(Boolean).join(', ') : '-';
+      case 'currentStatus':
+        return property.currentStatus || '-';
+      case 'landUse':
+        return <span className="max-w-xs truncate block text-sm">{property.landUse || '-'}</span>;
+      case 'buildingUse':
+        return <span className="max-w-xs truncate block text-sm">{property.buildingUse || '-'}</span>;
+      case 'landCategory':
+        return property.landCategory || '-';
+      case 'otherRestrictions':
+        return <span className="max-w-xs truncate block text-sm">{property.otherRestrictions || '-'}</span>;
+      case 'contractRenewalRight':
+        return property.contractRenewalRight || '-';
+      case 'ptExpl':
+        return <span className="max-w-xs truncate block text-sm">{property.ptExpl || '-'}</span>;
+      case 'addr1':
+        return property.addr1 || '-';
+      case 'addr2':
+        return property.addr2 || '-';
+      case 'addr3':
+        return property.addr3 || '-';
+      case 'ptMemo':
+        return <span className="max-w-xs truncate block text-gray-500 text-sm">{property.ptMemo || '-'}</span>;
+      case 'updDt':
+        return <span className="text-gray-500 text-sm">{property.updDt ? new Date(property.updDt).toLocaleDateString() : '-'}</span>;
+      case 'crtDt':
+        return <span className="text-gray-500 text-sm">{property.regDt ? new Date(property.regDt).toLocaleDateString() : '-'}</span>;
+      case 'actions':
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'center' }}>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                handleEdit(property);
+              }}
+              style={{
+                padding: '4px 12px',
+                fontSize: '13px',
+                color: '#4f46e5',
+                background: 'white',
+                border: '1px solid #4f46e5',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                width: '60px'
+              }}
+              onMouseEnter={(e) => {
+                e.target.style.background = '#eef2ff';
+              }}
+              onMouseLeave={(e) => {
+                e.target.style.background = 'white';
+              }}
+            >
+              수정
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                handleDelete(property.ptNo);
+              }}
+              style={{
+                padding: '4px 12px',
+                fontSize: '13px',
+                color: '#dc2626',
+                background: 'white',
+                border: '1px solid #dc2626',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                width: '60px'
+              }}
+              onMouseEnter={(e) => {
+                e.target.style.background = '#fef2f2';
+              }}
+              onMouseLeave={(e) => {
+                e.target.style.background = 'white';
+              }}
+            >
+              삭제
+            </button>
+          </div>
+        );
+      default:
+        return property[column.key] || '-';
+    }
+  };
+
+  // 페이지 변경 핸들러
+  const handlePageChange = (newPage) => {
+    setPagination(prev => ({ ...prev, page: newPage }));
+  };
+
+  // 테이블 데이터 준비 (고유 id 추가)
+  const tableData = filteredProperties.map((property) => ({
+    ...property,
+    id: property.ptNo,
+  }));
+
+  const hasSummaryListForTab = summaries.length > 0;
+
+  // 컨텍스트 메뉴 핸들러
+  const handleContextMenu = (e, property) => {
+    e.preventDefault();
+    setContextMenu({
+      show: true,
+      x: e.clientX,
+      y: e.clientY,
+    });
+  };
+
+  const handleCloseContextMenu = () => {
+    setContextMenu({ show: false, x: 0, y: 0 });
+  };
+
+  const handleNewProperty = () => {
+    handleAddProperty();
+    handleCloseContextMenu();
+  };
+
+  // 전역 클릭 이벤트로 컨텍스트 메뉴 닫기
+  useEffect(() => {
+    if (contextMenu.show) {
+      document.addEventListener('click', handleCloseContextMenu);
+      return () => document.removeEventListener('click', handleCloseContextMenu);
+    }
+  }, [contextMenu.show]);
+
+  return (
+    <div className="prop-page-container">
+
+      {/* 메인 컨텐츠 */}
+      <div className="prop-main-content">
+        <div className="prop-content-wrapper">
+          <div className="prop-table-section">
+            {/* 검색 조건 - 이미지와 같은 UI */}
+            <div style={{
+              backgroundColor: 'white',
+              border: '1px solid #d1d5db',
+              marginBottom: '8px',
+            }}>
+              {/* 첫번째 행 - 탭과 버튼들 */}
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                borderBottom: '1px solid #d1d5db',
+                padding: '4px 8px',
+                gap: '12px'
+              }}>
+                {/* 왼쪽: 전체물건/진행물건 탭 */}
+                <div style={{ display: 'flex', gap: '4px' }}>
+                  <button
+                    onClick={() => setActiveTab('all')}
+                    style={{
+                      padding: '4px 16px',
+                      fontSize: '13px',
+                      fontWeight: activeTab === 'all' ? '500' : '400',
+                      border: '1px solid #d1d5db',
+                      borderRadius: '3px',
+                      backgroundColor: activeTab === 'all' ? '#4f46e5' : 'white',
+                      cursor: 'pointer',
+                      color: activeTab === 'all' ? 'white' : '#6b7280'
+                    }}
+                  >
+                    전체물건
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('progress')}
+                    style={{
+                      padding: '4px 16px',
+                      fontSize: '13px',
+                      fontWeight: activeTab === 'progress' ? '500' : '400',
+                      border: '1px solid #d1d5db',
+                      borderRadius: '3px',
+                      backgroundColor: activeTab === 'progress' ? '#4f46e5' : 'white',
+                      cursor: 'pointer',
+                      color: activeTab === 'progress' ? 'white' : '#6b7280'
+                    }}
+                  >
+                    진행물건
+                  </button>
+                </div>
+
+                {/* 시트로 보기/배치도로 보기 버튼 */}
+                <div style={{ display: 'flex', gap: '4px', marginLeft: '12px' }}>
+                  <button
+                    onClick={() => setViewMode('sheet')}
+                    style={{
+                      padding: '4px 12px',
+                      fontSize: '11px',
+                      fontWeight: viewMode === 'sheet' ? '500' : '400',
+                      border: '1px solid #d1d5db',
+                      borderRadius: '3px',
+                      backgroundColor: viewMode === 'sheet' ? '#4f46e5' : 'white',
+                      cursor: 'pointer',
+                      color: viewMode === 'sheet' ? 'white' : '#374151'
+                    }}
+                  >
+                    시트로 보기
+                  </button>
+                  <button
+                    onClick={() => setViewMode('layout')}
+                    style={{
+                      padding: '4px 12px',
+                      fontSize: '11px',
+                      fontWeight: viewMode === 'layout' ? '500' : '400',
+                      border: '1px solid #d1d5db',
+                      borderRadius: '3px',
+                      backgroundColor: viewMode === 'layout' ? '#4f46e5' : 'white',
+                      cursor: 'pointer',
+                      color: viewMode === 'layout' ? 'white' : '#374151'
+                    }}
+                  >
+                    배치도로 보기
+                  </button>
+                </div>
+
+                {/* 빈 공간 */}
+                <div style={{ flex: 1 }}></div>
+
+                {/* 우측 버튼들 */}
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  {/* 엑셀 업로드 버튼 */}
+                  <button
+                    onClick={handleExcelUpload}
+                    style={{
+                      padding: '6px 14px',
+                      fontSize: '13px',
+                      fontWeight: '500',
+                      border: '1px solid #10b981',
+                      borderRadius: '6px',
+                      backgroundColor: '#10b981',
+                      color: 'white',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      transition: 'all 0.2s',
+                      boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)'
+                    }}
+                  >
+                    <Upload className="w-4 h-4" />
+                    엑셀 업로드
+                  </button>
+
+                  <button
+                    onClick={handleAddProperty}
+                    style={{
+                      padding: '6px 14px',
+                      fontSize: '13px',
+                      fontWeight: '500',
+                      border: '1px solid #4f46e5',
+                      borderRadius: '6px',
+                      backgroundColor: '#4f46e5',
+                      color: 'white',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      transition: 'all 0.2s',
+                      boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)'
+                    }}
+                  >
+                    <Plus className="w-4 h-4" />
+                    신규 물건 등록
+                  </button>
+
+                  <button
+                    onClick={handleAddPropertyV2}
+                    style={{
+                      padding: '6px 14px',
+                      fontSize: '13px',
+                      fontWeight: '500',
+                      border: '1px solid #10b981',
+                      borderRadius: '6px',
+                      backgroundColor: '#10b981',
+                      color: 'white',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      transition: 'all 0.2s',
+                      boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)'
+                    }}
+                  >
+                    <Plus className="w-4 h-4" />
+                    신규 물건 등록2
+                  </button>
+
+                  {/* 선택 삭제 버튼 */}
+                  {selectedPropertyNos.length > 0 && (
+                    <button
+                      onClick={handleDeleteSelected}
+                      style={{
+                        padding: '6px 14px',
+                        fontSize: '13px',
+                        fontWeight: '500',
+                        border: '1px solid #dc2626',
+                        borderRadius: '6px',
+                        backgroundColor: '#dc2626',
+                        color: 'white',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        transition: 'all 0.2s',
+                        boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)'
+                      }}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      선택 삭제 ({selectedPropertyNos.length})
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* 세번째 행 - 상세 검색 조건 */}
+              <div style={{ padding: '8px', backgroundColor: '#f9fafb', borderBottom: '1px solid #e5e7eb' }}>
+                {/* 물건종류 필터 */}
+                <div style={{ display: 'flex', gap: '4px', marginBottom: '8px', flexWrap: 'wrap' }}>
+                  {[
+                    { label: '모든물건', value: '' },
+                    { label: '아파트\n주상복합', value: 'PT_TYPE_01' },
+                    { label: '아파트분양권', value: 'PT_TYPE_02' },
+                    { label: '오피스텔', value: 'PT_TYPE_03' },
+                    { label: '오피스텔분양권', value: 'PT_TYPE_04' },
+                    { label: '재개발', value: 'PT_TYPE_05' },
+                    { label: '재건축', value: 'PT_TYPE_06' },
+                    { label: '단독/다가구', value: 'PT_TYPE_07' },
+                    { label: '상가주택', value: 'PT_TYPE_08' },
+                    { label: '빌라/연립', value: 'PT_TYPE_09' },
+                    { label: '상가/사무실', value: 'PT_TYPE_10' },
+                    { label: '공장/창고', value: 'PT_TYPE_11' },
+                    { label: '건물', value: 'PT_TYPE_12' },
+                    { label: '펜션/숙박', value: 'PT_TYPE_13' },
+                    { label: '지식산업센터', value: 'PT_TYPE_14' },
+                    { label: '토지', value: 'PT_TYPE_15' },
+                  ].map((type, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => handleFilterChange('ptType', type.value)}
+                      style={{
+                        padding: '5px 10px',
+                        fontSize: '11px',
+                        border: '1px solid #e5e7eb',
+                        borderRadius: '4px',
+                        backgroundColor: searchFilters.ptType === type.value ? '#4f46e5' : 'white',
+                        cursor: 'pointer',
+                        whiteSpace: 'pre-line',
+                        lineHeight: '1.2',
+                        minWidth: '60px',
+                        textAlign: 'center',
+                        color: searchFilters.ptType === type.value ? 'white' : '#6b7280',
+                        fontWeight: searchFilters.ptType === type.value ? '600' : '400',
+                        transition: 'all 0.2s',
+                        boxShadow: searchFilters.ptType === type.value ? '0 1px 2px 0 rgba(0, 0, 0, 0.05)' : 'none'
+                      }}
+                    >
+                      {type.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* 검색 필터 */}
+                <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-end' }}>
+                  {/* 거래유형 탭 */}
+                  <div style={{
+                    display: 'flex',
+                    backgroundColor: 'white',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '6px',
+                    overflow: 'hidden',
+                    boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
+                    marginRight: '12px'
+                  }}>
+                    <button
+                      onClick={() => handleSaleDivToggle('')}
+                      style={{
+                        padding: '6px 12px',
+                        fontSize: '11px',
+                        fontWeight: searchFilters.saleDiv === '' ? '600' : '400',
+                        border: 'none',
+                        borderRight: '1px solid #e5e7eb',
+                        backgroundColor: searchFilters.saleDiv === '' ? '#4f46e5' : 'white',
+                        cursor: 'pointer',
+                        color: searchFilters.saleDiv === '' ? 'white' : '#6b7280',
+                        transition: 'all 0.2s'
+                      }}
+                    >
+                      모든유형
+                    </button>
+                    <button
+                      onClick={() => handleSaleDivToggle('SALEDIV01')}
+                      style={{
+                        padding: '6px 12px',
+                        fontSize: '11px',
+                        fontWeight: isSaleDivSelected('SALEDIV01') ? '600' : '400',
+                        border: 'none',
+                        borderRight: '1px solid #e5e7eb',
+                        backgroundColor: isSaleDivSelected('SALEDIV01') ? '#4f46e5' : 'white',
+                        cursor: 'pointer',
+                        color: isSaleDivSelected('SALEDIV01') ? 'white' : '#6b7280',
+                        transition: 'all 0.2s'
+                      }}
+                    >
+                      매매
+                    </button>
+                    <button
+                      onClick={() => handleSaleDivToggle('SALEDIV02')}
+                      style={{
+                        padding: '6px 12px',
+                        fontSize: '11px',
+                        fontWeight: isSaleDivSelected('SALEDIV02') ? '600' : '400',
+                        border: 'none',
+                        borderRight: '1px solid #e5e7eb',
+                        backgroundColor: isSaleDivSelected('SALEDIV02') ? '#4f46e5' : 'white',
+                        cursor: 'pointer',
+                        color: isSaleDivSelected('SALEDIV02') ? 'white' : '#6b7280',
+                        transition: 'all 0.2s'
+                      }}
+                    >
+                      전세
+                    </button>
+                    <button
+                      onClick={() => handleSaleDivToggle('SALEDIV03')}
+                      style={{
+                        padding: '6px 12px',
+                        fontSize: '11px',
+                        fontWeight: isSaleDivSelected('SALEDIV03') ? '600' : '400',
+                        border: 'none',
+                        borderRight: '1px solid #e5e7eb',
+                        backgroundColor: isSaleDivSelected('SALEDIV03') ? '#4f46e5' : 'white',
+                        cursor: 'pointer',
+                        color: isSaleDivSelected('SALEDIV03') ? 'white' : '#6b7280',
+                        transition: 'all 0.2s'
+                      }}
+                    >
+                      월세
+                    </button>
+                    <button
+                      onClick={() => handleSaleDivToggle('SALEDIV04')}
+                      style={{
+                        padding: '6px 12px',
+                        fontSize: '11px',
+                        fontWeight: isSaleDivSelected('SALEDIV04') ? '600' : '400',
+                        border: 'none',
+                        backgroundColor: isSaleDivSelected('SALEDIV04') ? '#4f46e5' : 'white',
+                        cursor: 'pointer',
+                        color: isSaleDivSelected('SALEDIV04') ? 'white' : '#6b7280',
+                        transition: 'all 0.2s'
+                      }}
+                    >
+                      기타임대
+                    </button>
+                  </div>
+
+                  <div style={{ flex: '0 0 90px' }}>
+                    <select
+                      value={searchFilters.sido}
+                      onChange={(e) => handleFilterChange('sido', e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '4px 8px',
+                        fontSize: '11px',
+                        border: '1px solid #e5e7eb',
+                        borderRadius: '4px',
+                        backgroundColor: 'white',
+                        color: '#374151'
+                      }}
+                    >
+                      <option value="">시/도</option>
+                      {sidoList.map(sido => (
+                        <option key={sido.bjdCode} value={sido.bjdCode}>{sido.bjdName}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div style={{ flex: '0 0 90px' }}>
+                    <select
+                      value={searchFilters.sigungu}
+                      onChange={(e) => handleFilterChange('sigungu', e.target.value)}
+                      disabled={!searchFilters.sido}
+                      style={{
+                        width: '100%',
+                        padding: '4px 8px',
+                        fontSize: '11px',
+                        border: '1px solid #e5e7eb',
+                        borderRadius: '4px',
+                        backgroundColor: searchFilters.sido ? 'white' : '#f9fafb',
+                        color: '#374151'
+                      }}
+                    >
+                      <option value="">시/군/구</option>
+                      {sigunguList.map(sigungu => (
+                        <option key={sigungu.bjdCode} value={sigungu.bjdCode}>{sigungu.bjdName}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div style={{ flex: '0 0 90px' }}>
+                    <select
+                      value={searchFilters.eupMyeonDong}
+                      onChange={(e) => handleFilterChange('eupMyeonDong', e.target.value)}
+                      disabled={!searchFilters.sigungu}
+                      style={{
+                        width: '100%',
+                        padding: '4px 8px',
+                        fontSize: '11px',
+                        border: '1px solid #e5e7eb',
+                        borderRadius: '4px',
+                        backgroundColor: searchFilters.sigungu ? 'white' : '#f9fafb',
+                        color: '#374151'
+                      }}
+                    >
+                      <option value="">읍/면/동</option>
+                      {eupMyeonDongList.map(dong => (
+                        <option key={dong.bjdCode} value={dong.bjdCode}>{dong.bjdName}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* 리 드롭박스 (리 목록이 있는 경우에만 표시) */}
+                  {riList.length > 0 && (
+                    <div style={{ flex: '0 0 90px' }}>
+                      <select
+                        value={searchFilters.ri || ''}
+                        onChange={(e) => handleFilterChange('ri', e.target.value)}
+                        disabled={!searchFilters.eupMyeonDong}
+                        style={{
+                          width: '100%',
+                          padding: '4px 8px',
+                          fontSize: '11px',
+                          border: '1px solid #e5e7eb',
+                          borderRadius: '4px',
+                          backgroundColor: searchFilters.eupMyeonDong ? 'white' : '#f9fafb',
+                          color: '#374151'
+                        }}
+                      >
+                        <option value="">리</option>
+                        {riList.map(ri => (
+                          <option key={ri.bjdCode} value={ri.bjdCode}>{ri.bjdName}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {/* 지역 추가 버튼 */}
+                  <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'flex-end' }}>
+                    <button
+                      onClick={handleAddRegion}
+                      style={{
+                        padding: '4px 12px',
+                        fontSize: '11px',
+                        border: '1px solid #4f46e5',
+                        borderRadius: '4px',
+                        backgroundColor: '#4f46e5',
+                        color: 'white',
+                        cursor: 'pointer',
+                        fontWeight: '500',
+                        height: '26px'
+                      }}
+                    >
+                      추가
+                    </button>
+                  </div>
+
+                  {/* 선택된 지역 목록 */}
+                  {selectedRegions.length > 0 && (
+                    <div style={{
+                      flex: '1 1 auto',
+                      display: 'flex',
+                      gap: '4px',
+                      flexWrap: 'wrap',
+                      alignItems: 'flex-end',
+                      paddingBottom: '2px'
+                    }}>
+                      {selectedRegions.map((region, idx) => (
+                        <div
+                          key={idx}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            padding: '2px 8px',
+                            fontSize: '11px',
+                            backgroundColor: '#eef2ff',
+                            border: '1px solid #c7d2fe',
+                            borderRadius: '12px',
+                            color: '#4f46e5',
+                            fontWeight: '500'
+                          }}
+                        >
+                          <span>{region.text}</span>
+                          <button
+                            onClick={() => handleRemoveRegion(idx)}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              width: '14px',
+                              height: '14px',
+                              padding: 0,
+                              border: 'none',
+                              backgroundColor: 'transparent',
+                              color: '#4f46e5',
+                              cursor: 'pointer',
+                              fontSize: '13px',
+                              fontWeight: 'bold'
+                            }}
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* 추가 필터 버튼들 */}
+                <div style={{
+                  display: 'flex',
+                  gap: '0',
+                  marginTop: '10px',
+                  paddingTop: '10px',
+                  borderTop: '1px solid #e5e7eb',
+                  flexWrap: 'wrap',
+                  alignItems: 'stretch',
+                  minHeight: '70px'
+                }}>
+                  {/* 정렬방식 */}
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px',
+                    paddingLeft: '12px',
+                    paddingRight: '12px',
+                    borderRight: '2px solid #d1d5db'
+                  }}>
+                    <span style={{ fontSize: '11px', color: '#6b7280', fontWeight: '600', minWidth: '50px' }}>정렬방식</span>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                        <input
+                          type="radio"
+                          name="sortOrder"
+                          value="modified"
+                          checked={sortOrder === 'modified'}
+                          onChange={(e) => setSortOrder(e.target.value)}
+                          style={{ width: '14px', height: '14px', cursor: 'pointer' }}
+                        />
+                        <span style={{ fontSize: '11px', color: '#374151' }}>수정일</span>
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                        <input
+                          type="radio"
+                          name="sortOrder"
+                          value="recent_reg"
+                          checked={sortOrder === 'recent_reg'}
+                          onChange={(e) => setSortOrder(e.target.value)}
+                          style={{ width: '14px', height: '14px', cursor: 'pointer' }}
+                        />
+                        <span style={{ fontSize: '11px', color: '#374151' }}>최근등록일</span>
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                        <input
+                          type="radio"
+                          name="sortOrder"
+                          value="first_reg"
+                          checked={sortOrder === 'first_reg'}
+                          onChange={(e) => setSortOrder(e.target.value)}
+                          style={{ width: '14px', height: '14px', cursor: 'pointer' }}
+                        />
+                        <span style={{ fontSize: '11px', color: '#374151' }}>최초등록일</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* 보고서 작성 */}
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px',
+                    paddingLeft: '12px',
+                    paddingRight: '12px',
+                    borderRight: '2px solid #d1d5db'
+                  }}>
+                    <span style={{ fontSize: '11px', color: '#6b7280', fontWeight: '600', minWidth: '60px' }}>보고서 작성</span>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                      <button
+                        onClick={() => toast.info('초기화 기능은 준비 중입니다.')}
+                        style={{
+                          padding: '3px 10px',
+                          fontSize: '11px',
+                          border: '1px solid #e5e7eb',
+                          borderRadius: '4px',
+                          backgroundColor: 'white',
+                          cursor: 'pointer',
+                          color: '#374151',
+                          textAlign: 'left',
+                          transition: 'all 0.2s'
+                        }}
+                      >
+                        초기화
+                      </button>
+                      <button
+                        onClick={() => toast.info('편집 기능은 준비 중입니다.')}
+                        style={{
+                          padding: '3px 10px',
+                          fontSize: '11px',
+                          border: '1px solid #e5e7eb',
+                          borderRadius: '4px',
+                          backgroundColor: 'white',
+                          cursor: 'pointer',
+                          color: '#374151',
+                          textAlign: 'left',
+                          transition: 'all 0.2s'
+                        }}
+                      >
+                        편집{selectedPropertyNos.length > 0 ? `(${selectedPropertyNos.length})` : ''}
+                      </button>
+                      <button
+                        onClick={() => toast.info('목록 기능은 준비 중입니다.')}
+                        style={{
+                          padding: '3px 10px',
+                          fontSize: '11px',
+                          border: '1px solid #e5e7eb',
+                          borderRadius: '4px',
+                          backgroundColor: 'white',
+                          cursor: 'pointer',
+                          color: '#374151',
+                          textAlign: 'left',
+                          transition: 'all 0.2s'
+                        }}
+                      >
+                        목록
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 헤드라인 설정 */}
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px',
+                    paddingLeft: '12px',
+                    paddingRight: '12px',
+                    borderRight: '2px solid #d1d5db'
+                  }}>
+                    <span style={{ fontSize: '11px', color: '#6b7280', fontWeight: '600', minWidth: '70px' }}>헤드라인 설정</span>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                      <button
+                        onClick={() => toast.info('초기화 기능은 준비 중입니다.')}
+                        style={{
+                          padding: '3px 10px',
+                          fontSize: '11px',
+                          border: '1px solid #e5e7eb',
+                          borderRadius: '4px',
+                          backgroundColor: 'white',
+                          cursor: 'pointer',
+                          color: '#374151',
+                          textAlign: 'left',
+                          transition: 'all 0.2s'
+                        }}
+                      >
+                        초기화
+                      </button>
+                      <button
+                        onClick={() => setShowTableSettings(true)}
+                        style={{
+                          padding: '3px 10px',
+                          fontSize: '11px',
+                          border: '1px solid #e5e7eb',
+                          borderRadius: '4px',
+                          backgroundColor: 'white',
+                          cursor: 'pointer',
+                          color: '#374151',
+                          textAlign: 'left',
+                          transition: 'all 0.2s'
+                        }}
+                      >
+                        수정 및 저장
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 채우기 버튼 */}
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    paddingLeft: '12px',
+                    paddingRight: '12px',
+                    borderRight: '2px solid #d1d5db'
+                  }}>
+                    <button
+                      onClick={() => toast.info('채우기 기능은 준비 중입니다.')}
+                      style={{
+                        padding: '3px 10px',
+                        fontSize: '11px',
+                        border: '1px solid #e5e7eb',
+                        borderRadius: '4px',
+                        backgroundColor: 'white',
+                        cursor: 'pointer',
+                        color: '#374151',
+                        transition: 'all 0.2s'
+                      }}
+                    >
+                      채우기
+                    </button>
+                  </div>
+
+                  {/* 일괄변경 */}
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px',
+                    paddingLeft: '12px',
+                    paddingRight: '12px',
+                    borderRight: '2px solid #d1d5db'
+                  }}>
+                    <span style={{ fontSize: '11px', color: '#6b7280', fontWeight: '600', minWidth: '50px' }}>일괄변경</span>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                      <button
+                        onClick={() => toast.info('단지명 변경 기능은 준비 중입니다.')}
+                        style={{
+                          padding: '3px 10px',
+                          fontSize: '11px',
+                          border: '1px solid #e5e7eb',
+                          borderRadius: '4px',
+                          backgroundColor: 'white',
+                          cursor: 'pointer',
+                          color: '#374151',
+                          textAlign: 'left',
+                          transition: 'all 0.2s'
+                        }}
+                      >
+                        단지명
+                      </button>
+                      <button
+                        onClick={() => toast.info('동 변경 기능은 준비 중입니다.')}
+                        style={{
+                          padding: '3px 10px',
+                          fontSize: '11px',
+                          border: '1px solid #e5e7eb',
+                          borderRadius: '4px',
+                          backgroundColor: 'white',
+                          cursor: 'pointer',
+                          color: '#374151',
+                          textAlign: 'left',
+                          transition: 'all 0.2s'
+                        }}
+                      >
+                        동
+                      </button>
+                      <button
+                        onClick={() => toast.info('호 변경 기능은 준비 중입니다.')}
+                        style={{
+                          padding: '3px 10px',
+                          fontSize: '11px',
+                          border: '1px solid #e5e7eb',
+                          borderRadius: '4px',
+                          backgroundColor: 'white',
+                          cursor: 'pointer',
+                          color: '#374151',
+                          textAlign: 'left',
+                          transition: 'all 0.2s'
+                        }}
+                      >
+                        호
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 줄수 */}
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px',
+                    paddingLeft: '12px',
+                    paddingRight: '12px',
+                    borderRight: '2px solid #d1d5db'
+                  }}>
+                    <span style={{ fontSize: '11px', color: '#6b7280', fontWeight: '600', minWidth: '50px' }}>줄수</span>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                        <input
+                          type="radio"
+                          name="rowCount"
+                          value="all"
+                          checked={rowCount === 'all'}
+                          onChange={(e) => setRowCount(e.target.value)}
+                          style={{ width: '14px', height: '14px', cursor: 'pointer' }}
+                        />
+                        <span style={{ fontSize: '11px', color: '#374151' }}>전부</span>
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                        <input
+                          type="radio"
+                          name="rowCount"
+                          value="20"
+                          checked={rowCount === '20'}
+                          onChange={(e) => setRowCount(e.target.value)}
+                          style={{ width: '14px', height: '14px', cursor: 'pointer' }}
+                        />
+                        <span style={{ fontSize: '11px', color: '#374151' }}>20줄</span>
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                        <input
+                          type="radio"
+                          name="rowCount"
+                          value="30"
+                          checked={rowCount === '30'}
+                          onChange={(e) => setRowCount(e.target.value)}
+                          style={{ width: '14px', height: '14px', cursor: 'pointer' }}
+                        />
+                        <span style={{ fontSize: '11px', color: '#374151' }}>30줄</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* 층 */}
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px',
+                    paddingLeft: '12px',
+                    paddingRight: '12px',
+                    borderRight: '2px solid #d1d5db'
+                  }}>
+                    <span style={{ fontSize: '11px', color: '#6b7280', fontWeight: '600', minWidth: '50px' }}>층</span>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                        <input
+                          type="radio"
+                          name="floorFilter"
+                          value="all"
+                          checked={floorFilter === 'all'}
+                          onChange={(e) => setFloorFilter(e.target.value)}
+                          style={{ width: '14px', height: '14px', cursor: 'pointer' }}
+                        />
+                        <span style={{ fontSize: '11px', color: '#374151' }}>전부</span>
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                        <input
+                          type="radio"
+                          name="floorFilter"
+                          value="top"
+                          checked={floorFilter === 'top'}
+                          onChange={(e) => setFloorFilter(e.target.value)}
+                          style={{ width: '14px', height: '14px', cursor: 'pointer' }}
+                        />
+                        <span style={{ fontSize: '11px', color: '#374151' }}>탑층</span>
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                        <input
+                          type="radio"
+                          name="floorFilter"
+                          value="first"
+                          checked={floorFilter === 'first'}
+                          onChange={(e) => setFloorFilter(e.target.value)}
+                          style={{ width: '14px', height: '14px', cursor: 'pointer' }}
+                        />
+                        <span style={{ fontSize: '11px', color: '#374151' }}>1층만</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* 전용면적 */}
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    paddingLeft: '12px',
+                    paddingRight: '12px',
+                    borderRight: '2px solid #d1d5db'
+                  }}>
+                    <span style={{ fontSize: '11px', color: '#6b7280', fontWeight: '600', minWidth: '60px' }}>전용면적</span>
+                    <input
+                      type="text"
+                      placeholder="전용면적"
+                      style={{
+                        width: '80px',
+                        padding: '3px 10px',
+                        fontSize: '11px',
+                        border: '1px solid #e5e7eb',
+                        borderRadius: '4px',
+                        outline: 'none'
+                      }}
+                    />
+                  </div>
+
+                  {/* 검색 버튼 */}
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    paddingLeft: '12px'
+                  }}>
+                    <button
+                      onClick={fetchProperties}
+                      style={{
+                        padding: '8px 32px',
+                        fontSize: '14px',
+                        fontWeight: '600',
+                        border: '1px solid #4f46e5',
+                        borderRadius: '6px',
+                        backgroundColor: '#4f46e5',
+                        color: 'white',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s',
+                        boxShadow: '0 2px 4px 0 rgba(0, 0, 0, 0.1)'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.target.style.backgroundColor = '#4338ca';
+                        e.target.style.borderColor = '#4338ca';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.target.style.backgroundColor = '#4f46e5';
+                        e.target.style.borderColor = '#4f46e5';
+                      }}
+                    >
+                      검색
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* 데이터 목록 영역 (물건리스트 + 테이블) */}
+            <div style={{ display: 'flex', flex: 1, gap: '0', overflow: 'hidden' }}>
+              {/* 물건리스트 사이드바 */}
+              {hasSummaryListForTab && (
+                <div style={{
+                  width: showSummaryList ? '256px' : '48px',
+                  backgroundColor: 'white',
+                  borderRight: '1px solid #e5e7eb',
+                  transition: 'width 0.3s ease',
+                  overflow: 'hidden',
+                  flexShrink: 0,
+                  display: 'flex',
+                  flexDirection: 'column',
+                }}>
+                  <div style={{
+                    padding: showSummaryList ? '1rem' : '0.5rem',
+                    borderBottom: '1px solid #e5e7eb',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                  }}>
+                    {showSummaryList && (
+                      <>
+                        <h3 className="font-medium text-gray-900 mb-1">
+                          물건리스트{activeTab === 'progress' ? `(${progressCount})` : `(${pagination.total})`}
+                        </h3>
+                        <button
+                          onClick={() => setShowSummaryList(false)}
+                          className="p-1 hover:bg-gray-100 rounded"
+                          title="접기"
+                        >
+                          <ChevronLeft className="w-4 h-4 text-gray-600" />
+                        </button>
+                      </>
+                    )}
+                    {!showSummaryList && (
+                      <div className="flex flex-col items-center">
+                        <button
+                          onClick={() => setShowSummaryList(true)}
+                          className="p-1 hover:bg-gray-100 rounded mb-2"
+                          title="펼치기"
+                        >
+                          <ChevronRight className="w-4 h-4 text-gray-600" />
+                        </button>
+                        <div style={{
+                          writingMode: 'vertical-rl',
+                          fontSize: '13px',
+                          fontWeight: '500',
+                          color: '#4b5563',
+                          letterSpacing: '0.1em'
+                        }}>
+                          물건리스트
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  {showSummaryList && (
+                    <>
+                      <div className="p-2 overflow-y-auto" style={{ flex: 1 }}>
+                        {selectedSummary && (
+                          <button
+                            onClick={() => handleSummaryClick(null)}
+                            className="w-full mb-2 flex items-center justify-between px-3 py-2 text-sm text-gray-600 bg-gray-50 rounded hover:bg-gray-100"
+                          >
+                            <span>전체 보기</span>
+                            <X className="w-4 h-4" />
+                          </button>
+                        )}
+                        {summaries.map(summary => (
+                          <div key={summary.groupKey} className="mb-2">
+                            <button
+                              onClick={() => handleSummaryClick(summary)}
+                              className={`w-full px-3 py-2 text-sm text-left rounded transition-colors ${
+                                selectedSummary?.groupKey === summary.groupKey
+                                  ? 'bg-indigo-100 text-indigo-700 font-medium'
+                                  : 'text-gray-700 hover:bg-gray-100'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between">
+                                <span className="font-medium">{summary.displayName}</span>
+                                <span className="text-xs px-2 py-0.5 bg-indigo-50 text-indigo-600 rounded-full font-semibold">{summary.propertyCount}건</span>
+                              </div>
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* 테이블 카드 */}
+              <Card
+                className="prop-table-card"
+                padding="none"
+                style={{ flex: 1, minWidth: 0 }}
+              >
+              {viewMode === 'sheet' ? (
+                <CustomerTable
+                  menuId="properties"
+                  allColumns={allTableColumns}
+                  defaultColumns={defaultTableColumns}
+                  data={tableData}
+                  isLoading={loading}
+                  renderCell={renderTableCell}
+                  onRowClick={handleRowClick}
+                  currentPage={pagination.page}
+                  totalPages={Math.ceil(pagination.total / pagination.pageSize)}
+                  pageSize={pagination.pageSize}
+                  onPageChange={handlePageChange}
+                  emptyMessage="검색 결과가 없습니다"
+                />
+              ) : (
+                <LayoutView
+                  selectedDanji={selectedSummary}
+                  onClose={() => setViewMode('sheet')}
+                />
+              )}
+              </Card>
+            </div>
+            {/* 데이터 목록 영역 끝 */}
+          </div>
+        </div>
+      </div>
+
+      {/* 컨텍스트 메뉴 */}
+      {contextMenu.show && (
+        <div
+          style={{
+            position: 'fixed',
+            top: contextMenu.y,
+            left: contextMenu.x,
+            backgroundColor: 'white',
+            border: '1px solid #e5e7eb',
+            borderRadius: '6px',
+            boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)',
+            zIndex: 1000,
+            minWidth: '180px'
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            onClick={handleNewProperty}
+            className="w-full px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2 rounded-md"
+          >
+            <Plus className="w-4 h-4" />
+            물건신규등록
+          </button>
+        </div>
+      )}
+
+      {/* 상담이력 패널 (컨텍스트 메뉴에서 열림) */}
+      {isPanelOpen && selectedProperty && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            right: 0,
+            bottom: 0,
+            width: `${panelWidth}px`,
+            backgroundColor: 'white',
+            boxShadow: '-2px 0 8px rgba(0, 0, 0, 0.1)',
+            zIndex: 999,
+            display: 'flex',
+            flexDirection: 'column'
+          }}
+        >
+          {/* 헤더 */}
+          <div style={{
+            padding: '1rem',
+            borderBottom: '1px solid #e5e7eb',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between'
+          }}>
+            <h3 className="font-semibold text-gray-900">상담이력</h3>
+            <button
+              onClick={() => setIsPanelOpen(false)}
+              className="p-1 hover:bg-gray-100 rounded"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          {/* 내용 */}
+          <div style={{ flex: 1, overflow: 'auto' }}>
+            <ConsultationHistoryPanel
+              ptNo={selectedProperty.ptNo}
+              defaultData={{
+                ptNo: selectedProperty.ptNo,
+                ptName: selectedProperty.ptName,
+                ptType: selectedProperty.ptType,
+              }}
+              autoOpen={true}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* 물건 등록/수정 모달 */}
+      <PropertyModal
+        isOpen={showPropertyModal}
+        onClose={() => setShowPropertyModal(false)}
+        onSuccess={handleModalSuccess}
+        editData={editPropertyData}
+      />
+
+      {/* 물건 보기 모달 */}
+      <PropertyViewModal
+        isOpen={showViewModal}
+        onClose={() => {
+          setShowViewModal(false);
+          setViewProperty(null);
+        }}
+        property={viewProperty}
+        onEdit={(property) => {
+          setShowViewModal(false);
+          setViewProperty(null);
+          setEditPropertyData(property);
+          setShowPropertyModal(true);
+        }}
+      />
+
+      {/* 브리핑 모달 */}
+      <PropertyBriefingModal
+        isOpen={showBriefingModal}
+        onClose={() => {
+          setShowBriefingModal(false);
+          setBriefingProperty(null);
+        }}
+        property={briefingProperty}
+      />
+
+      {/* 테이블 설정 모달 */}
+      <TableSettings
+        isOpen={showTableSettings}
+        onClose={() => setShowTableSettings(false)}
+        menuId="properties"
+        allColumns={allTableColumns}
+        columns={tableColumns.length > 0 ? tableColumns : defaultTableColumns}
+        setColumns={setTableColumns}
+        onSave={() => {
+          // 테이블 설정 저장 시 로컬스토리지에 저장하는 로직은 TableSettings 컴포넌트에서 처리
+          console.log('테이블 설정이 저장되었습니다.');
+        }}
+      />
+
+      <style jsx>{`
+        .prop-page-container {
+          height: 100vh;
+          display: flex;
+          flex-direction: column;
+          background-color: #f9fafb;
+        }
+
+        .prop-page-header {
+          padding: 1.5rem;
+          background-color: white;
+          border-bottom: 1px solid #e5e7eb;
+          flex-shrink: 0;
+        }
+
+        .prop-header-content {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          margin-bottom: 1rem;
+        }
+
+        .prop-page-title {
+          font-size: 1.5rem;
+          font-weight: 700;
+          color: #111827;
+        }
+
+        .prop-page-description {
+          color: #4b5563;
+        }
+
+        .prop-header-actions {
+          display: flex;
+          gap: 0.5rem;
+        }
+
+        .prop-btn {
+          display: flex;
+          align-items: center;
+          padding: 0.5rem 1rem;
+          border-radius: 0.375rem;
+          font-size: 0.875rem;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.2s;
+          border: none;
+        }
+
+        .prop-btn-icon {
+          width: 1rem;
+          height: 1rem;
+          margin-right: 0.5rem;
+        }
+
+        .prop-btn-outline {
+          color: #374151;
+          background-color: white;
+          border: 1px solid #d1d5db;
+        }
+
+        .prop-btn-outline:hover {
+          background-color: #f9fafb;
+        }
+
+        .prop-btn-primary {
+          color: white;
+          background-color: #6366f1;
+        }
+
+        .prop-btn-primary:hover {
+          background-color: #4f46e5;
+        }
+
+        .prop-btn-secondary {
+          color: #374151;
+          background-color: white;
+          border: 1px solid #d1d5db;
+        }
+
+        .prop-btn-secondary:hover {
+          background-color: #f9fafb;
+        }
+
+        .prop-tabs-container {
+          display: flex;
+          gap: 0.5rem;
+          border-bottom: 1px solid #e5e7eb;
+          overflow-x: auto;
+        }
+
+        .prop-tab {
+          display: flex;
+          align-items: center;
+          padding: 0.5rem 1rem;
+          border-bottom: 2px solid transparent;
+          color: #6b7280;
+          font-weight: normal;
+          white-space: nowrap;
+          cursor: pointer;
+          background: none;
+          border: none;
+          border-bottom: 2px solid transparent;
+        }
+
+        .prop-tab-active {
+          border-bottom: 2px solid #4f46e5;
+          color: #4f46e5;
+          font-weight: 500;
+        }
+
+        .prop-tab-icon {
+          width: 1rem;
+          height: 1rem;
+          margin-right: 0.5rem;
+        }
+
+        .prop-main-content {
+          flex: 1;
+          display: flex;
+          overflow: hidden;
+        }
+
+        .prop-content-wrapper {
+          flex: 1;
+          display: flex;
+          gap: 1rem;
+          overflow: hidden;
+          padding: 0 1rem 1rem 1rem;
+        }
+
+        .prop-table-section {
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+          min-width: 0;
+        }
+
+
+        .prop-table-card {
+          flex: 1;
+          overflow: hidden;
+          display: flex;
+          flex-direction: column;
+          min-height: 0;
+        }
+
+        .prop-panel-wrapper {
+          position: relative;
+          display: flex;
+          flex-shrink: 0;
+          transition: width 0.3s ease;
+        }
+
+        .prop-panel-resizer {
+          position: absolute;
+          left: 0;
+          top: 0;
+          bottom: 0;
+          width: 4px;
+          cursor: col-resize;
+          background-color: transparent;
+          z-index: 15;
+          transition: background-color 0.2s;
+        }
+
+        .prop-panel-resizer:hover {
+          background-color: #6366f1;
+        }
+
+        .prop-panel-resizer:active {
+          background-color: #4f46e5;
+        }
+
+        .prop-panel-toggle {
+          position: absolute;
+          left: 4px;
+          top: 0;
+          bottom: 0;
+          width: 36px;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          background-color: white;
+          border: 1px solid #e5e7eb;
+          border-radius: 0.5rem 0 0 0.5rem;
+          cursor: pointer;
+          transition: all 0.2s;
+          z-index: 10;
+        }
+
+        .prop-panel-closed .prop-panel-toggle {
+          left: 0;
+        }
+
+        .prop-panel-toggle:hover {
+          background-color: #f9fafb;
+        }
+
+        .prop-panel-label {
+          writing-mode: vertical-rl;
+          text-orientation: mixed;
+          font-size: 0.875rem;
+          font-weight: 500;
+          color: #374151;
+          margin-top: 0.5rem;
+        }
+
+        .prop-panel-content {
+          flex: 1;
+          margin-left: 40px;
+          overflow-y: auto;
+          background-color: white;
+          border: 1px solid #e5e7eb;
+          border-left: none;
+          border-radius: 0 0.5rem 0.5rem 0;
+        }
+      `}</style>
+    </div>
+  );
+};
+
+export default PropertiesPage;

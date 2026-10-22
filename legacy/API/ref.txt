@@ -1,0 +1,92 @@
+CREATE TABLE public.sys_menu (
+	id int4 DEFAULT nextval('sys_menu_id'::regclass) NOT NULL,
+	mnu_nm varchar(50) NULL,
+	lvl int4 NULL,
+	parent_id int4 NULL,
+	use_yn varchar(1) NULL,
+	reg_dt timestamp NULL,
+	reg_id varchar(13) NULL,
+	upd_dt timestamp NULL,
+	upd_id varchar(13) NULL,
+	sort int4 NULL,
+	CONSTRAINT sys_menu_pkey PRIMARY KEY (id)
+);
+
+
+CREATE TABLE public.sys_menu_rt (
+	rt_no int8 NOT NULL,
+	id int4 NOT NULL,
+	c_yn varchar(1) NULL,
+	r_yn varchar(1) NULL,
+	u_yn varchar(1) NULL,
+	d_yn varchar(1) NULL,
+	use_yn varchar(1) NULL,
+	reg_dt timestamp NULL,
+	reg_id varchar(13) NULL,
+	upd_dt timestamp NULL,
+	upd_id varchar(13) NULL,
+	CONSTRAINT pk_sys_menu_rt PRIMARY KEY (rt_no, id)
+);
+
+CREATE TABLE public.rt_realtor_info (
+	"RtNo" int8 DEFAULT nextval('rt_realtor_info_rt_no_seq'::regclass) NOT NULL,
+	"RtType" varchar(10) NULL,
+	"RtNm" varchar(10) NULL,
+	"RtTel" varchar(500) NULL,
+	"RtRegNo" varchar(20) NULL,
+	"OffNo" int8 NULL,
+	"Grade" varchar(10) NULL,
+	"Id" varchar(20) NULL,
+	"Pw" varchar(200) NULL,
+	"RegDt" timestamp NULL,
+	"RegId" varchar(13) NULL,
+	"UpdDt" timestamp NULL,
+	"UpdId" varchar(13) NULL,
+	CONSTRAINT pk_rt_realtor_info PRIMARY KEY ("RtNo")
+);
+
+
+-- 회원가입 시 수정된 프로시저 코드
+ELSIF p_proc = 'INS' THEN
+    -- rt_realtor_info에 회원 정보 삽입
+    INSERT INTO rt_realtor_info
+    (
+        "RtType", "RtNm", "RtTel", "RtRegNo", "OffNo", "Grade", "Id", "Pw",
+        "RegDt", "RegId"
+    )
+    VALUES
+    (
+        p_rt_type,
+        p_rt_nm,
+        p_rt_tel,
+        p_rt_reg_no,
+        p_off_no,
+        p_grade,
+        p_id,
+        p_pw,
+        CURRENT_TIMESTAMP,
+        p_user_id
+    )
+    RETURNING "RtNo" INTO v_rt_no; -- 생성된 RtNo를 변수에 저장
+
+    -- RtType이 'RTTYP01'인 경우에만 sys_menu_rt에 권한 삽입
+    IF p_rt_type = 'RTTYP01' THEN
+        -- sys_menu의 모든 메뉴를 sys_menu_rt에 권한 Y로 삽입
+        INSERT INTO sys_menu_rt (rt_no, id, c_yn, r_yn, u_yn, d_yn, use_yn, reg_dt, reg_id)
+        SELECT
+            v_rt_no,           -- 방금 생성된 회원의 RtNo
+            sm.id,             -- sys_menu의 id
+            'Y',               -- Create 권한
+            'Y',               -- Read 권한
+            'Y',               -- Update 권한
+            'Y',               -- Delete 권한
+            'Y',               -- 사용여부
+            CURRENT_TIMESTAMP, -- 등록일시
+            p_user_id          -- 등록자 ID
+        FROM sys_menu sm
+        WHERE sm.use_yn = 'Y';  -- 사용 가능한 메뉴만 삽입
+    END IF;
+
+-- 변수 선언 (프로시저 상단에 추가 필요)
+-- DECLARE
+--     v_rt_no int8;

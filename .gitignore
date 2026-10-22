@@ -1,0 +1,70 @@
+# 빌드 산출물
+bin/
+obj/
+publish/
+*.user
+.vs/
+__pycache__/
+*.log
+*.suo
+*.dll
+*.exe
+*.pdb
+*.zip
+*.tar
+dist-electron/
+
+# 로컬 DB·임시 파일
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+schema/sqlite/verify.db
+
+# ───────────────────────────────────────────────
+# 비밀값 — 연결 문자열·키·토큰
+# ───────────────────────────────────────────────
+
+# 설정 파일(운영 DB 연결 문자열 포함). 새 코드는 appsettings.Local.json 또는 환경변수 NEOSIS_PG 사용
+appsettings.json
+appsettings.Local.json
+appsettings.*.Local.json
+secrets.json
+legacy/API/appsettings.json
+legacy/API/appsettings.Development.json
+.env
+.env.*
+!.env.example
+
+# 인증서·키 파일
+*.pfx
+*.p12
+*.pem
+*.key
+*.snk
+*.jks
+*.keystore
+*.publishsettings
+*.pubxml.user
+
+# Claude Code 개인 설정
+.claude/settings.local.json
+**/.claude/settings.local.json
+
+# legacy 소스 중 비밀값이 하드코딩된 파일(참고용이라 저장소에서 제외, 로컬 사본은 유지)
+#  - NCP Object Storage 키
+legacy/API/set_bucket_cors.py
+#  - 운영 DB 비밀번호·네이버 Bearer 토큰이 들어간 마이그레이션/크롤링 스크립트
+legacy/API/tools/
+#  - 토스 결제 시크릿 키
+legacy/API/Admin/Services/PaymentService.cs
+#  - 네이버 Bearer 토큰
+legacy/API/Admin/Services/NaverSyncService.cs
+#  - 외부 API 인증키(CL_AUTH_KEY)
+legacy/API/Admin/Models/ApiModels.cs
+
+# legacy 의존성(복사 시 제외했으나 재설치 대비)
+node_modules/
+legacy/**/dist/
+legacy/**/.next/

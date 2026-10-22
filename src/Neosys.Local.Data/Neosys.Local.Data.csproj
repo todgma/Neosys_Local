@@ -1,0 +1,26 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Dapper" Version="2.1.35" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.11" />
+  </ItemGroup>
+
+  <!-- SQL 파일은 모두 임베디드 리소스로 넣어 exe 하나에 포함한다. 리소스 이름 = Sql/<하위경로>/<파일명> -->
+  <ItemGroup>
+    <EmbeddedResource Include="Sql\**\*.sql" LogicalName="Sql/%(RecursiveDir)%(Filename)%(Extension)" />
+    <!-- 스키마는 tools/SchemaExport 결과물을 그대로 포함(복사본을 두지 않는다) -->
+    <EmbeddedResource Include="..\..\schema\sqlite\schema.sql" LogicalName="Sql/schema.sql" Link="Sql\schema.sql" />
+    <EmbeddedResource Include="..\..\schema\sqlite\seed.sql" LogicalName="Sql/Seed/000_base.sql" Link="Sql\Seed\000_base.sql" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Neosys.Local.Tests" />
+  </ItemGroup>
+
+</Project>

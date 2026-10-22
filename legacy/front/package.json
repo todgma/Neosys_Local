@@ -1,0 +1,78 @@
+{
+  "name": "realestate-erp",
+  "version": "1.7.9",
+  "description": "네오시스 시스템",
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "electron": "electron .",
+    "electron:dev": "concurrently \"npm run dev\" \"wait-on http-get://localhost:1420 && electron .\"",
+    "electron:build": "npm run build && electron-builder",
+    "dist": "npm run build && electron-builder --publish=never"
+  },
+  "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
+    "@microsoft/signalr": "^8.0.7",
+    "@revolist/revogrid": "^4.17.3",
+    "ag-grid-community": "^31.0.3",
+    "ag-grid-react": "^31.0.3",
+    "axios": "^1.5.0",
+    "html2canvas": "^1.4.1",
+    "jspdf": "^2.5.1",
+    "koffi": "^3.1.2",
+    "korean-lunar-calendar": "^0.4.0",
+    "lucide-react": "^0.268.0",
+    "moment": "^2.30.1",
+    "react": "^18.3.1",
+    "react-big-calendar": "^1.19.4",
+    "react-dom": "^18.3.1",
+    "react-hot-toast": "^2.6.0",
+    "react-router-dom": "^6.14.2",
+    "react-to-print": "^3.3.0",
+    "tailwindcss": "^3.3.3",
+    "xlsx": "^0.18.5",
+    "zustand": "^4.4.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.7.0",
+    "autoprefixer": "^10.4.14",
+    "concurrently": "^8.2.0",
+    "electron": "^26.6.10",
+    "electron-builder": "^24.6.3",
+    "postcss": "^8.4.27",
+    "vite": "^4.5.14",
+    "wait-on": "^7.0.1"
+  },
+  "build": {
+    "appId": "com.realestate.erp",
+    "productName": "네오시스",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "assets/**/*",
+      "node_modules/**/*"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false,
+      "differentialPackage": true,
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico"
+    }
+  }
+}

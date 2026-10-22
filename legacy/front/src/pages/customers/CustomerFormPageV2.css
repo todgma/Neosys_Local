@@ -1,0 +1,77 @@
+/* 고객 등록/수정 폼 V2 — 풀페이지 레이아웃(하단바 항상 고정)
+   PropertyFormPageV2와 동일 컨셉, 클래스명은 cfp2-* 로 완전히 분리 */
+
+.cfp2-page {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  background-color: #f9fafb;
+}
+
+.cfp2-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 1rem;
+  background-color: #ffffff;
+  border-bottom: 1px solid #e5e7eb;
+  flex-shrink: 0;
+}
+
+.cfp2-title {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: #111827;
+}
+
+.cfp2-close {
+  padding: 0.5rem;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: #6b7280;
+  border-radius: 0.375rem;
+  transition: all 0.2s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cfp2-close:hover {
+  background-color: #f3f4f6;
+  color: #111827;
+}
+
+/* 폼: 헤더 아래 남은 영역 전체, 내부는 세로 스택 */
+.cfp2-form {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* 본문: 남은 높이 채우고, 화면이 작아 내용이 넘치면 세로 스크롤 */
+.cfp2-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+}
+
+/* 하단 고정바 */
+.cfp2-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background-color: #f8fafc;
+  border-top: 1px solid #cbd5e1;
+  flex-shrink: 0;
+}

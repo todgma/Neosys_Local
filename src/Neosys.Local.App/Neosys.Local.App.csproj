@@ -1,0 +1,41 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Neosys.Local.Core\Neosys.Local.Core.csproj" />
+    <ProjectReference Include="..\Neosys.Local.Data\Neosys.Local.Data.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\**\*.png" />
+    <Resource Include="Assets\Fonts\*.otf" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.3.2" />
+    <!-- 가입비 결제창(웹 결제 페이지를 프로그램 안 창으로 — 기존 Electron payment:open). Windows 10/11 기본 WebView2 런타임 사용 -->
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.3065.39" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>Neosys</AssemblyName>
+    <RootNamespace>Neosys.Local.App</RootNamespace>
+    <Product>네오시스 로컬</Product>
+    <Version>0.1.0</Version>
+  </PropertyGroup>
+
+  <!-- 단일 exe 배포: dotnet publish -c Release -r win-x64 (아래 설정이 적용된다) -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+
+</Project>

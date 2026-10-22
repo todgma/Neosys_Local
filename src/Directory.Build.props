@@ -1,0 +1,6 @@
+<Project>
+  <!-- 배포(Release) 빌드는 pdb를 만들지 않는다 — publish 폴더에 exe 1개만 남도록 -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+</Project>
