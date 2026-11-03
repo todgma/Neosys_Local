@@ -91,13 +91,48 @@ public class ContractWorklogTests
         }
         await Add("전세", "2026-11-30");
         await Add("월세", "2027-05-01");
-        await Add("주인거주", "2026-11-01");          // 제외(현상태)
-        await Add("전세", "2026-11-15", "SYCA108");   // 제외(건물)
+        await Add("주인거주", "2026-11-01");          // 포함 — 현상태와 무관
+        await Add("전세", "2026-11-15", "SYCA108");   // 포함 — 건물도 만기일이 있으면 노출
+        await Add("전세", "");                        // 제외 — 만기일 없음
         var svc = new ExpiryService(t.Sp, t.SessionAccessor);
         var list = await svc.ListAsync(new DateTime(2026, 10, 1), new DateTime(2026, 12, 31));
-        Assert.Single(list);
-        Assert.Equal("2026-11-30", list[0].Str("expiry_date"));
-        Assert.Equal(2, (await svc.ListAsync(null, null)).Count);
+        Assert.Equal(new[] { "2026-11-01", "2026-11-15", "2026-11-30" }, list.Select(r => r.Str("expiry_date")));
+        Assert.Equal(4, (await svc.ListAsync(null, null)).Count);
+        Assert.Single(await svc.ListAsync(null, null, "SYCA108"));
+    }
+
+    [Fact]
+    public async Task 만기관리_표기와_일정등록값()
+    {
+        using var t = new TestDb();
+        var apt = new Row { ["pt_type"] = "SYCA101", ["addr4"] = "개포자이", ["addr5"] = "무시", ["pt_name"] = "개포자이 101동", ["dong"] = "101", ["ho"] = "1203", ["jibun"] = "12-3", ["apt_typ"] = "84A", ["sup_area"] = 112.4m, ["addr"] = "서울 개포동 개포자이", ["expiry_date"] = "2026-12-20", ["pt_no"] = 5L };
+        Assert.Equal("개포자이", ExpiryService.NameText(apt));
+        Assert.Equal("101동 1203호", ExpiryService.DetailText(apt));
+        Assert.Equal("84A", ExpiryService.AreaText(apt));
+
+        var land = new Row { ["pt_type"] = "SYCA115", ["addr5"] = "논", ["dong"] = "1", ["jibun"] = "55-1", ["sup_area"] = 100.5m };
+        Assert.Equal("논", ExpiryService.NameText(land));
+        Assert.Equal("55-1", ExpiryService.DetailText(land));
+        Assert.Equal("100.5/-㎡", ExpiryService.AreaText(land));
+
+        var empty = new Row { ["pt_type"] = "SYCA117" };
+        Assert.Equal("-", ExpiryService.NameText(empty));
+        Assert.Equal("-", ExpiryService.DetailText(empty));
+        Assert.Equal("-", ExpiryService.AreaText(empty));
+
+        // 일정등록 — 저장하면 물건에 연동된 만기일 일정이 된다
+        var pt = new PropertyService(t.Sp, t.SessionAccessor);
+        var d = pt.New("SYCA101");
+        d.Pt["bjd_code"] = "1168010300";
+        apt["pt_no"] = await pt.SaveAsync(d);
+        var svc = new ScheduleService(t.Sp, t.SessionAccessor);
+        var draft = ExpiryService.ScheduleDraft(svc, apt);
+        Assert.Equal("서울 개포동 개포자이 101동 1203호", draft.Str("location"));
+        Assert.StartsWith("[만기] ", draft.Str("content"));
+        var saved = (await svc.GetAsync(await svc.SaveAsync(draft)))!;
+        Assert.Equal("만기일", saved.Str("title"));
+        Assert.StartsWith("2026-12-20", saved.Str("start_at"));
+        Assert.Single(await svc.ByPropertyAsync(apt.Long("pt_no")!.Value));
     }
 
     [Fact]

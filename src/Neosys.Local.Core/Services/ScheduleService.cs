@@ -93,5 +93,13 @@ public sealed class ScheduleService : ServiceBase
         return true;
     }
 
+    /// <summary>일정 범위(scope_div)가 달력 보기(OFFICE 사무소 일정 / MY 나의 일정)에 보이는지 — rt_schedule.LIST와 같은 규칙(본인 일정 기준)</summary>
+    public static bool VisibleIn(string? scopeDiv, string view) => view switch
+    {
+        "OFFICE" => scopeDiv is "OFFICE" or "SHARE",
+        "MY" => scopeDiv is null or "MY" or "SHARE",
+        _ => true,
+    };
+
     public Task DeleteAsync(long id) => Sp.ExecuteAsync("rt_schedule", "DEL", P(new { schedule_id = id }));
 }

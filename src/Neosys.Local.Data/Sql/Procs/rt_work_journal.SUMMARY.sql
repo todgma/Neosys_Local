@@ -9,6 +9,7 @@ SELECT (SELECT count(*) FROM "pt_sale_hist" WHERE changed_by = @session_user_id 
        (SELECT count(*) FROM "ct_cust_hist" WHERE changed_by = @session_user_id AND log_type = 'D' AND substr(logged_at, 1, 10) = @q_date) AS cust_del,
        (SELECT count(*) FROM "contract_master_hist" WHERE changed_by = @session_user_id AND log_type = 'I' AND substr(logged_at, 1, 10) = @q_date) AS contract_write,
        (SELECT count(*) FROM "contract_master_hist" WHERE changed_by = @session_user_id AND log_type = 'U' AND substr(logged_at, 1, 10) = @q_date) AS contract_upd,
+       (SELECT count(*) FROM "contract_master_hist" WHERE changed_by = @session_user_id AND log_type = 'D' AND substr(logged_at, 1, 10) = @q_date) AS contract_del,
        (SELECT count(*) FROM "rt_schedule_hist" WHERE changed_by = @session_user_id AND log_type = 'I' AND substr(logged_at, 1, 10) = @q_date) AS sched_reg,
        (SELECT count(*) FROM "rt_schedule_hist" WHERE changed_by = @session_user_id AND log_type = 'U' AND substr(logged_at, 1, 10) = @q_date) AS sched_upd,
        (SELECT count(*) FROM "rt_schedule_hist" WHERE changed_by = @session_user_id AND log_type = 'D' AND substr(logged_at, 1, 10) = @q_date) AS sched_del,

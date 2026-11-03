@@ -42,6 +42,8 @@ public static class Catalog
     public static readonly IReadOnlySet<string> CommercialOfficeCodes = new HashSet<string> { "SYCA109", "SYCA113", "SYCA114" };
     /// <summary>단지형(아파트 폼) — 단지 선택·동/호·평형 사용</summary>
     public static readonly IReadOnlySet<string> ApartmentFormCodes = new HashSet<string> { "SYCA101", "SYCA102", "SYCA103", "SYCA105", "SYCA106", "SYCA107" };
+    /// <summary>단지 기반 유형(APARTMENT_RELATED_CODES) — 아파트 폼 + 재건축/재개발. 엑셀 업로드에서 단지 선택·동/호 정규화 대상</summary>
+    public static readonly IReadOnlySet<string> ApartmentRelatedCodes = new HashSet<string> { "SYCA101", "SYCA102", "SYCA103", "SYCA104", "SYCA105", "SYCA106", "SYCA107", "SYCA120" };
     public static readonly IReadOnlySet<string> SalesRightCodes = new HashSet<string> { "SYCA105", "SYCA106" };
     public static readonly IReadOnlySet<string> RedevCodes = new HashSet<string> { "SYCA104", "SYCA120" };
     public static readonly IReadOnlySet<string> BuildingCodes = new HashSet<string> { "SYCA108", "SYCA110", "SYCA111" };

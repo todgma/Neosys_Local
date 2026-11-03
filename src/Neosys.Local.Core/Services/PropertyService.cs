@@ -166,10 +166,21 @@ public sealed class PropertyService : ServiceBase
     /// <summary>진행상태만 변경(목록에서). null = 상태 해제</summary>
     public Task SetStatusAsync(long ptNo, string? ptSts) => Sp.ExecuteAsync("pt_sale", "STATUS", P(new { pt_no = ptNo, pt_sts = ptSts }));
 
-    /// <summary>삭제. saveHistory=true면 과거내역(pt_sale_old)에 보관한 뒤 삭제(기존 "이력 저장 후 삭제")</summary>
-    public Task DeleteAsync(long ptNo, bool saveHistory = false) => Sp.InTransactionAsync(async tx =>
+    /// <summary>삭제 전 확인용 연동 정보 건수 — 연결된 일정(사용중)·사진·평면도</summary>
+    public async Task<(int Schedules, int Files)> LinkCountsAsync(long ptNo)
+    {
+        var r = await Sp.QueryRowAsync("pt_sale", "LINKS", new { pt_no = ptNo });
+        return ((int)(r?.Long("schedule_cnt") ?? 0), (int)(r?.Long("file_cnt") ?? 0));
+    }
+
+    /// <summary>
+    /// 삭제. saveHistory=true면 과거내역(pt_sale_old)에 보관한 뒤 삭제(기존 "이력 저장 후 삭제").
+    /// deleteLinks=true면 연동 정보도 함께 — 일정의 물건 연동을 끊고(일정은 남김) 사진·평면도를 사용안함. false면 연동은 그대로 둔다.
+    /// </summary>
+    public Task DeleteAsync(long ptNo, bool saveHistory = false, bool deleteLinks = false) => Sp.InTransactionAsync(async tx =>
     {
         if (saveHistory) await tx.ExecuteAsync("pt_sale", "ARCHIVE", new { pt_no = ptNo });
+        if (deleteLinks) await tx.ExecuteAsync("pt_sale", "DEL_LINKS", P(new { pt_no = ptNo }));
         return await tx.ExecuteAsync("pt_sale", "DEL", new { pt_no = ptNo });
     });
 

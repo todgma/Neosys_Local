@@ -13,6 +13,8 @@ public sealed record UploadField(string Key, string Label, string Group);
 public sealed class UploadCommon
 {
     public string? PtType { get; set; }
+    public string? SidoCode { get; set; }      // 화면 복원용(시/도·시/군/구 선택값)
+    public string? SigunguCode { get; set; }
     public string? BjdCode { get; set; }
     public string? Addr1 { get; set; }
     public string? Addr2 { get; set; }
@@ -22,6 +24,24 @@ public sealed class UploadCommon
 }
 
 public sealed record UploadError(int RowNo, string Message);
+
+/// <summary>
+/// 단지 동·호·타입 목록(서버 /api/system/dong-list·ho-list·area-list) — 결과 키는 서버 그대로(dong_no, dong_name / ho_name, ptp_no, floor, sply_spc, excls_spc / ptp_no, plan_type_name, room_cnt, bathroom_cnt)
+/// </summary>
+public interface IDanjiSource
+{
+    Task<List<Row>> GetDongListAsync(string danjiCode);
+    Task<List<Row>> GetHoListAsync(string danjiCode, int dongNo);
+    Task<List<Row>> GetAreaListAsync(string danjiCode);
+}
+
+/// <summary>운영 서버 API로 단지 정보를 조회</summary>
+public sealed class ServerDanjiSource(Server.ServerApi api) : IDanjiSource
+{
+    public Task<List<Row>> GetDongListAsync(string danjiCode) => api.GetDongListAsync(danjiCode);
+    public Task<List<Row>> GetHoListAsync(string danjiCode, int dongNo) => api.GetHoListAsync(danjiCode, dongNo);
+    public Task<List<Row>> GetAreaListAsync(string danjiCode) => api.GetAreaListAsync(danjiCode);
+}
 
 public sealed class UploadResult
 {
@@ -38,11 +58,14 @@ public sealed class BulkUploadService : ServiceBase
 {
     private readonly PropertyService _pt;
     private readonly CustomerService _cust;
+    private readonly IDanjiSource? _danji;
 
-    public BulkUploadService(SpRunner sp, Func<AppSession> session) : base(sp, session)
+    /// <param name="danji">단지 동·호·타입 조회(운영 서버 공용 데이터). null이면 동/호 정규화·타입 자동 채움을 하지 않는다(서버 없는 테스트용)</param>
+    public BulkUploadService(SpRunner sp, Func<AppSession> session, IDanjiSource? danji = null) : base(sp, session)
     {
         _pt = new PropertyService(sp, session);
         _cust = new CustomerService(sp, session);
+        _danji = danji;
     }
 
     // ---------------- 컬럼 항목(기존 uploadFields.js) ----------------
@@ -50,22 +73,30 @@ public sealed class BulkUploadService : ServiceBase
     private static IEnumerable<UploadField> G(string group, string pairs) =>
         pairs.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(p => p.Split('=')).Select(a => new UploadField(a[0].Trim(), a[1].Trim(), group));
 
+    // 물건 항목 — 원본 uploadFields.js(2026-10-28 개편: 기본사항에 소재지·면적 통합, 프리미엄/권리금·욕실수(화장실수) 병합, 등록일/수정일 추가)
     public static readonly IReadOnlyList<UploadField> PropertyFields = new[]
     {
-        G("기본", "ptSts=진행상태; saleDiv=거래구분"),
-        G("소재지", "addr1=시도; addr2=시군구; addr3=읍면동; addr4=단지/건물명; addr5=상세주소; jibun=지번; dong=동; ho=호; floor1=해당층; floor2=총층"),
-        G("면적/타입", "aptTyp=타입(평형); supArea=공급면적; excArea=전용면적; landShare=대지지분; buildingArea=대지면적; grossArea=연면적; houseCnt=세대수; roomCnt=방 수; bathCnt=욕실 수; areaUnit=면적단위"),
-        G("상세정보", "subType=세부유형; dirStd=방향; dirBase=방향기준; heatMethod=난방방식; heatFuel=난방연료; entrStruct=현관구조; buildingForm=건물형태; buidStruct=건물구조; balcExt=발코니; pkCnt=총주차대수; evChargerCnt=전기차충전대수; compYear=준공년도; buildingUse=건축물용도; mainBuildingUse=주용도; landCategory=지목; landUse=용도지역; top=탑층여부; opt=옵션; basementFloor=지하층수; groundFloor=지상층수; elevatorCnt=엘리베이터수; stairsCnt=계단수; guestRoomCnt=객실수; toilet=화장실수; cityGas=도시가스; powerReceiving=수전설비; elecCapacity=전기용량; accessRoad=진입도로; roadInfo=도로정보; communityFacility=커뮤니티시설; addrDetail=상세주소; officeArea=사무면적; maintZoneName=관리지역명"),
-        G("금액", "saleAmt=매매금액; lesAmt=전세금액; protAmt=보증금(월세); monAmt=월세(차임); etcAmt=기타임대 보증금; etcAmt2=기타임대 차임; loanAmt=대출금액; maintCost=관리비; maintDtl=관리비내역; presaleAmt=분양금액; premiumAmt=프리미엄; layAmt=권리금; rightValueAmt=권리가액; addContribAmt=추가분담금; expansionAmt=확장비; optionAmt=옵션비; facilityCost=시설비; movingCost=이주비; investAmt=투자금; depositTotal=보증금합계; loanTotal=대출합계"),
-        G("현상황", "currentStatus=현상태; nowDepAmt=현재보증금; nowMonAmt=현재월차임; houseRental=주택임대사업자; contractRenewalRight=계약갱신청구권"),
-        G("일정", "mtryDate=만기일; exptMovDate=이사예정일; exptDate=잔금예정일; contractDate=계약일자; holdDate=보유(취득)일; permitDate=허가일"),
-        G("제한사항", "zoneAdjust=청약조정대상지역; zoneOverheat=투기과열지구; zoneSpec=투기지역; zoneLandPermit=토지거래허가구역; childYn=어린이; childCond=어린이 조건; petAllow=반려동물; petCond=반려동물 조건; otherRestrictions=기타제한; buildPermit=건축허가"),
+        G("기본사항", "ptSts=진행상태; addr1=시도; addr2=시군구; addr3=읍면동; addr4=단지/건물명; addr5=상세주소; jibun=지번; dong=동; ho=호; floor1=해당층; floor2=총층; aptTyp=타입(평형); supArea=공급면적; excArea=전용면적; landShare=대지지분; buildingArea=대지면적; grossArea=연면적; roomCnt=방 수; bathCnt=욕실수(화장실수)"),
+        G("금액", "saleDiv=거래구분; saleAmt=매매금액; lesAmt=전세금액; protAmt=보증금(월세); monAmt=월세(차임); etcAmt=기타임대 보증금; etcAmt2=기타임대 차임; loanAmt=대출금액; maintCost=관리비; maintDtl=관리비내역; presaleAmt=분양금액; premiumLayAmt=프리미엄/권리금; rightValueAmt=권리가액; addContribAmt=추가분담금; expansionAmt=확장비; optionAmt=옵션비; facilityCost=시설비; movingCost=이주비; investAmt=투자금; depositTotal=보증금합계; loanTotal=대출합계; currentStatus=현상태; nowDepAmt=현재보증금; nowMonAmt=현재월차임"),
+        G("일정", "mtryDate=만기일; exptMovDate=이사예정일; exptDate=잔금예정일; contractDate=계약일자; holdDate=보유(취득)일; permitDate=허가일; regDt=등록일; updDt=수정일"),
+        G("거래당사자/상담", "owner1Name=소유자1; owner1Phone=소유자1 연락처; owner2Name=소유자2; owner2Phone=소유자2 연락처; tenant1Name=임차인1; tenant1Phone=임차인1 연락처; tenant2Name=임차인2; tenant2Phone=임차인2 연락처; agent1Name=공인중개사1; agent1Phone=공인중개사1 연락처; agent2Name=공인중개사2; agent2Phone=공인중개사2 연락처; registryOwner=등기명의; contractTenant=계약임차인; ptExpl=물건특징; consultContent=상담내용"),
+        G("상세정보", "houseRental=주택임대사업자; contractRenewalRight=계약갱신청구권; businessName=상호명; businessType=업종; recommendedBusiness=추천업종; subType=세부유형; dirStd=방향; dirBase=방향기준; heatMethod=난방방식; heatFuel=난방연료; entrStruct=현관구조; buildingForm=건물형태; buidStruct=건물구조; balcExt=발코니; houseCnt=세대수; pkCnt=총주차대수; evChargerCnt=전기차충전대수; compYear=준공년도; buildingUse=건축물용도; mainBuildingUse=주용도; landCategory=지목; landUse=용도지역; top=탑층여부; opt=옵션; basementFloor=지하층수; groundFloor=지상층수; elevatorCnt=엘리베이터수; stairsCnt=계단수; guestRoomCnt=객실수; cityGas=도시가스; elecCapacity=전기용량; accessRoad=진입도로; communityFacility=커뮤니티시설; officeArea=사무면적; maintZoneName=관리지역명"),
+        G("제한사항", "zoneAdjust=청약조정대상지역; zoneOverheat=투기과열지구; zoneSpec=투기지역; zoneLandPermit=토지거래허가구역; childYn=어린이; childCond=어린이 조건; petAllow=반려동물; petCond=반려동물 조건; otherRestrictions=기타제한"),
         G("수익/지출(월·연)", "incRentM=임대수입(월); incRentY=임대수입(년); incMgmtM=관리수입(월); incMgmtY=관리수입(년); incEtcM=기타수입(월); incEtcY=기타수입(년); expLaborM=인건비(월); expLaborY=인건비(년); expUtilM=공과금(월); expUtilY=공과금(년); expLoanM=대출이자(월); expLoanY=대출이자(년); expEtcM=기타지출(월); expEtcY=기타지출(년)"),
-        G("사업/상가", "businessName=상호명; businessType=업종; registryOwner=등기명의; contractTenant=계약임차인; recommendedBusiness=추천업종"),
         G("종전(재개발/재건축)", "formerPtType=종전 물건유형; formerAptTyp=종전 타입; formerArea=종전 면적; formerDong=종전 동; formerHo=종전 호; formerJibun=종전 지번; formerLandShareRatio=종전 대지지분율"),
-        G("특징/상담", "ptExpl=물건특징; consultContent=상담내용"),
-        G("거래당사자", "owner1Name=소유자1; owner1Phone=소유자1 연락처; owner2Name=소유자2; owner2Phone=소유자2 연락처; tenant1Name=임차인1; tenant1Phone=임차인1 연락처; tenant2Name=임차인2; tenant2Phone=임차인2 연락처; agent1Name=공인중개사1; agent1Phone=공인중개사1 연락처; agent2Name=공인중개사2; agent2Phone=공인중개사2 연락처"),
     }.SelectMany(x => x).ToList();
+
+    // 거래당사자 칸(소유자/임차인/공인중개사) — 물건 컬럼이 아니라 holders/shares로 간다(기존 PARTY_KEYS)
+    private static readonly HashSet<string> PartyKeys = new()
+    {
+        "owner1Name", "owner1Phone", "owner2Name", "owner2Phone", "tenant1Name", "tenant1Phone", "tenant2Name", "tenant2Phone",
+        "agent1Name", "agent1Phone", "agent2Name", "agent2Phone",
+    };
+    // 거래구분 자동세팅(TRADE_DIVISIONS) — 금액이 들어간 구분을 활성 코드로
+    private static readonly (string Code, string[] Amt)[] TradeDivisions =
+    {
+        ("SALEDIV01", new[] { "sale_amt" }), ("SALEDIV02", new[] { "les_amt" }), ("SALEDIV03", new[] { "prot_amt", "mon_amt" }), ("SALEDIV04", new[] { "etc_amt", "etc_amt2" }),
+    };
 
     public static readonly IReadOnlyList<UploadField> CustomerFields = new[]
     {
@@ -168,6 +199,17 @@ public sealed class BulkUploadService : ServiceBase
 
     private static long? ToInt(string v) => long.TryParse(new string(v.Where(c => char.IsDigit(c) || c == '-').ToArray()), out var n) ? n : null;
     private static double? ToDec(string v) => double.TryParse(new string(v.Where(c => char.IsDigit(c) || c is '.' or '-').ToArray()), NumberStyles.Float, CultureInfo.InvariantCulture, out var n) ? n : null;
+    /// <summary>등록일/수정일(과거 데이터 이관용) → 'yyyy-MM-dd HH:mm:ss'. 날짜로 읽을 수 없으면 그 행은 실패(원본은 서버 timestamp 변환 오류)</summary>
+    private static string ToDateTime(string v, string label)
+    {
+        var s = v.Trim().Replace('.', '-').Replace('/', '-');
+        var formats = new[] { "yyyy-M-d", "yyyy-M-d H:m", "yyyy-M-d H:m:s", "yyyyMMdd", "yyyy-M-dTH:m:s" };
+        if (DateTime.TryParseExact(s, formats, CultureInfo.InvariantCulture, DateTimeStyles.AllowWhiteSpaces, out var dt)
+            || DateTime.TryParse(s, CultureInfo.GetCultureInfo("ko-KR"), DateTimeStyles.AllowWhiteSpaces, out dt))
+            return dt.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+        throw new FormatException($"{label} '{v}' 을(를) 날짜로 읽을 수 없습니다.");
+    }
+
     private static long? ToBool(string v) => v.Trim().ToLowerInvariant() switch
     {
         "y" or "yes" or "true" or "1" or "o" or "예" or "해당" or "가능" => 1,
@@ -188,17 +230,29 @@ public sealed class BulkUploadService : ServiceBase
         var d = _pt.New(raw.GetValueOrDefault("ptType") ?? common.PtType);
         d.Holders.Clear();
         var p = d.Pt;
-        var party = new HashSet<string>(PropertyFields.Where(f => f.Group == "거래당사자").Select(f => f.Key));
         foreach (var (key, val) in raw)
         {
-            if (key is "areaUnit" or "consultContent" || party.Contains(key)) continue;
+            if (key is "areaUnit" or "consultContent" or "premiumLayAmt" || PartyKeys.Contains(key)) continue;
             object? v = IntKeys.Contains(key) ? ToInt(val) : DecKeys.Contains(key) ? ToDec(val) : BoolKeys.Contains(key) ? ToBool(val)
                 : key == "ptSts" ? Code(val, Catalog.PropertyProgress)
                 : key == "saleDiv" ? Code(val, Catalog.SaleDivisions)
+                : key is "regDt" or "updDt" ? ToDateTime(val, key == "regDt" ? "등록일" : "수정일")
                 : val;
             if (v is not null) p[Snake(key)] = v;
         }
         if (raw.TryGetValue("areaUnit", out var unit)) p["area_unit"] = unit;
+
+        // 프리미엄/권리금(병합 칸) — 분양권·재개발/재건축은 프리미엄(premium_amt), 그 외(상가 등)는 권리금(lay_amt)
+        var ptType = raw.GetValueOrDefault("ptType") ?? common.PtType ?? "";
+        if (raw.TryGetValue("premiumLayAmt", out var pl) && ToInt(pl) is { } plAmt)
+            p[Catalog.SalesRightCodes.Contains(ptType) || Catalog.RedevCodes.Contains(ptType) ? "premium_amt" : "lay_amt"] = plAmt;
+
+        // 욕실수(화장실수) 한 칸 → bath_cnt + toilet 두 컬럼에 같은 값
+        if (p.Long("bath_cnt") is { } bath) p["toilet"] = bath.ToString(CultureInfo.InvariantCulture);
+
+        // 거래구분 자동세팅 — 금액이 들어간 구분(매매/전세/월세/기타임대)을 활성 코드로(거래구분 칸보다 우선, 원본과 같음)
+        var divs = TradeDivisions.Where(t => t.Amt.Any(a => p.Long(a) is > 0)).Select(t => t.Code).ToList();
+        if (divs.Count > 0) p["sale_div"] = string.Join(",", divs);
 
         var today = LocalDate.Today;
         void Holder(string type, string n, string ph)
@@ -226,7 +280,7 @@ public sealed class BulkUploadService : ServiceBase
         if (!p.Has("addr1") && common.Addr1 is not null) p["addr1"] = common.Addr1;
         if (!p.Has("addr2") && common.Addr2 is not null) p["addr2"] = common.Addr2;
         if (!p.Has("addr3") && common.Addr3 is not null) p["addr3"] = common.Addr3;
-        if (!p.Has("danji_code") && !string.IsNullOrEmpty(common.DanjiCode) && Catalog.ApartmentFormCodes.Contains(p.Str("pt_type") ?? "")) p["danji_code"] = common.DanjiCode;
+        if (!p.Has("danji_code") && !string.IsNullOrEmpty(common.DanjiCode) && Catalog.ApartmentRelatedCodes.Contains(p.Str("pt_type") ?? "")) p["danji_code"] = common.DanjiCode;
         if (common.PtName?.Trim() is { Length: > 0 } pn)
         {
             if (!p.Has("pt_name")) p["pt_name"] = pn;
@@ -289,12 +343,82 @@ public sealed class BulkUploadService : ServiceBase
     public async Task<UploadResult> UploadPropertiesAsync(IEnumerable<(int RowNo, Dictionary<string, string> Values)> rows, UploadCommon common)
     {
         var res = new UploadResult();
+        var cache = new DanjiCache();
         foreach (var (no, raw) in rows)
         {
-            try { await _pt.SaveAsync(BuildProperty(raw, common)); res.Success++; }
+            try
+            {
+                var d = BuildProperty(raw, common);
+                await ResolveDanjiAsync(d.Pt, cache);
+                await _pt.SaveAsync(d);
+                res.Success++;
+            }
             catch (Exception ex) { res.Errors.Add(new UploadError(no, ex.Message)); }
         }
         return res;
+    }
+
+    // ---------------- 단지형: 동/호 정규화 + 타입 자동 채움 ----------------
+
+    /// <summary>한 번 업로드하는 동안 단지별 동·호·타입 목록을 한 번만 조회</summary>
+    public sealed class DanjiCache
+    {
+        internal readonly Dictionary<string, List<Row>> Dongs = new();
+        internal readonly Dictionary<string, List<Row>> Hos = new();
+        internal readonly Dictionary<string, List<Row>> Areas = new();
+    }
+
+    /// <summary>라벨 정규화(공백 제거 + 끝의 동/호 접미사 제거) — '101동'/'101 '/'101'을 같은 것으로 본다</summary>
+    public static string CanonLabel(string? s, char suffix)
+    {
+        if (string.IsNullOrWhiteSpace(s)) return "";
+        var t = new string(s.Where(ch => !char.IsWhiteSpace(ch)).ToArray());
+        return t.Length > 0 && t[^1] == suffix ? t[..^1] : t;
+    }
+
+    /// <summary>
+    /// 단지가 있는 물건만: 동·호 명칭을 단지 데이터로 정규화(못 찾으면 그 행 실패)하고, 호가 확인되면
+    /// 타입(평형)·공급/전용면적·방 수·욕실수(화장실수)·해당층을 입력이 없는 칸만 채운다.
+    /// 원본 서버 BulkInsertProperties(2026-10-28) — danji_ho_new ⟕ danji_area_new(ptp_no)와 같은 결합을 서버 목록 API로 한다.
+    /// </summary>
+    public async Task ResolveDanjiAsync(Row p, DanjiCache cache)
+    {
+        if (_danji is null || !int.TryParse(p.Str("danji_code")?.Trim(), out var code)) return;
+        var danji = code.ToString(CultureInfo.InvariantCulture);
+
+        long? dongNo = null;
+        if (p.Has("dong"))
+        {
+            if (!cache.Dongs.TryGetValue(danji, out var dongs)) cache.Dongs[danji] = dongs = await _danji.GetDongListAsync(danji);
+            var want = CanonLabel(p.Str("dong"), '동');
+            var m = dongs.FirstOrDefault(x => want.Length > 0 && CanonLabel(x.Str("dong_name"), '동') == want)
+                ?? throw new InvalidOperationException($"동 '{p.Str("dong")}' 을(를) 단지에서 찾을 수 없습니다.");
+            p["dong"] = m.Str("dong_name");
+            dongNo = m.Long("dong_no");
+        }
+
+        if (!p.Has("ho")) return;
+        if (dongNo is null) throw new InvalidOperationException("호를 조회하려면 동이 먼저 지정/확인되어야 합니다.");
+        var hoKey = $"{danji}|{dongNo}";
+        if (!cache.Hos.TryGetValue(hoKey, out var hos)) cache.Hos[hoKey] = hos = await _danji.GetHoListAsync(danji, (int)dongNo.Value);
+        var wantHo = CanonLabel(p.Str("ho"), '호');
+        var ho = hos.FirstOrDefault(x => wantHo.Length > 0 && CanonLabel(x.Str("ho_name"), '호') == wantHo)
+            ?? throw new InvalidOperationException($"호 '{p.Str("ho")}' 을(를) 해당 동에서 찾을 수 없습니다.");
+        p["ho"] = ho.Str("ho_name");
+
+        // 타입명·방·화장실은 면적(타입) 목록에서 ptp_no로 찾는다. 호 목록에 방/화장실이 같이 오면 그것을 먼저 쓴다.
+        if (!cache.Areas.TryGetValue(danji, out var areas)) cache.Areas[danji] = areas = await _danji.GetAreaListAsync(danji);
+        var area = ho.Long("ptp_no") is { } ptp ? areas.FirstOrDefault(a => a.Long("ptp_no") == ptp) : null;
+        var room = ho.Long("room_cnt") ?? area?.Long("room_cnt");
+        var bath = ho.Long("bathroom_cnt") ?? area?.Long("bathroom_cnt");
+
+        if (!p.Has("apt_typ") && area?.Str("plan_type_name") is { Length: > 0 } typ) p["apt_typ"] = typ;
+        if (!p.Has("sup_area") && ho.Dec("sply_spc") is { } sup) p["sup_area"] = Math.Round((double)sup, 2);
+        if (!p.Has("exc_area") && ho.Dec("excls_spc") is { } exc) p["exc_area"] = Math.Round((double)exc, 2);
+        if (!p.Has("room_cnt") && room is not null) p["room_cnt"] = room;
+        if (!p.Has("bath_cnt") && bath is not null) p["bath_cnt"] = bath;
+        if (!p.Has("toilet") && bath is not null) p["toilet"] = bath.Value.ToString(CultureInfo.InvariantCulture);
+        if (!p.Has("floor1") && int.TryParse(ho.Str("floor")?.Trim(), out var floor)) p["floor1"] = (long)floor;
     }
 
     public async Task<UploadResult> UploadCustomersAsync(IEnumerable<(int RowNo, Dictionary<string, string> Values)> rows)
@@ -312,52 +436,66 @@ public sealed class BulkUploadService : ServiceBase
 
     private static readonly JsonSerializerOptions Json = new() { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
-    /// <summary>행을 바로 등록하지 않고 임시저장. payload = {values, common}</summary>
+    /// <summary>
+    /// 지금 그리드 내용을 등록하지 않고 1건으로 임시저장(원본 2026-10-28: 배치 전체 = 임시저장 1건, 상단 공통 폼 함께 보관).
+    /// payload = {rows: [{항목키: 값}...], common}. 돌려주는 값: 보관한 행 수
+    /// </summary>
     public async Task<int> StageAsync(string target, IEnumerable<Dictionary<string, string>> rows, UploadCommon? common)
     {
-        var n = 0;
-        foreach (var raw in rows)
-        {
-            var payload = JsonSerializer.Serialize(new { values = raw, common }, Json);
-            var label = raw.GetValueOrDefault("ptName") ?? common?.PtName ?? raw.GetValueOrDefault("buyer1Name") ?? raw.GetValueOrDefault("addr4") ?? raw.GetValueOrDefault("alias1") ?? "(제목 없음)";
-            if (target == "property" && (raw.GetValueOrDefault("dong") ?? raw.GetValueOrDefault("ho")) is not null) label += $" {raw.GetValueOrDefault("dong")} {raw.GetValueOrDefault("ho")}".TrimEnd();
-            await Sp.ExecuteAsync("rt_upload_staging", "INS", P(new { target, payload, label }));
-            n++;
-        }
-        return n;
+        var list = rows.ToList();
+        if (list.Count == 0) return 0;
+        var payload = JsonSerializer.Serialize(new { rows = list, common }, Json);
+        var label = $"{(target == "customer" ? "고객" : "물건")} {list.Count}건";
+        await Sp.ExecuteAsync("rt_upload_staging", "INS", P(new { target, payload, label }));
+        return list.Count;
     }
 
-    public Task<List<Row>> StagingAsync(string target) => Sp.QueryRowsAsync("rt_upload_staging", "SEL", P(new { target }));
+    /// <summary>임시저장 목록(최근 순). 각 행에 건수(count)를 붙인다</summary>
+    public async Task<List<Row>> StagingAsync(string target)
+    {
+        var rows = await Sp.QueryRowsAsync("rt_upload_staging", "SEL", P(new { target }));
+        foreach (var r in rows) r["count"] = (long)ParsePayload(r.Str("payload")).Rows.Count;
+        return rows;
+    }
 
     public Task DeleteStagingAsync(long stagingId) => Sp.ExecuteAsync("rt_upload_staging", "DEL", P(new { staging_id = stagingId }));
 
-    /// <summary>임시저장 → 확정 등록. 확정을 시도한 행은 성공 여부와 관계없이 임시저장에서 지운다(중복 확정 방지 — 기존과 같음)</summary>
-    public async Task<UploadResult> CommitStagingAsync(IEnumerable<Row> staged)
+    /// <summary>
+    /// 선택한 임시저장의 모든 행을 그리드로 불러올 내용으로(원본 loadSelectedIntoGrid). 컬럼 = 등장한 항목만, 항목 정의 순서.
+    /// 상단 공통 폼이 복원되면 소재지(시도/시군구/읍면동/단지·건물명) 칸은 빼서 중복을 막는다. 임시저장은 지우지 않는다(원본과 같음).
+    /// </summary>
+    public (List<string> Columns, List<Dictionary<string, string>> Rows, UploadCommon? Common) LoadStaging(string target, IEnumerable<Row> staged)
     {
-        var total = new UploadResult();
+        var rows = new List<Dictionary<string, string>>();
+        UploadCommon? common = null;
         foreach (var s in staged)
         {
-            var id = s.Long("staging_id") ?? 0;
-            var (values, common) = ParsePayload(s.Str("payload"));
-            var one = s.Str("target") == "customer"
-                ? await UploadCustomersAsync(new[] { ((int)id, values) })
-                : await UploadPropertiesAsync(new[] { ((int)id, values) }, common);
-            total.Success += one.Success;
-            total.Errors.AddRange(one.Errors);
-            await DeleteStagingAsync(id);
+            var (r, c) = ParsePayload(s.Str("payload"));
+            rows.AddRange(r);
+            if (common is null && c is not null && (c.PtType ?? c.BjdCode ?? c.DanjiCode) is not null) common = c;
         }
-        return total;
+        var fields = target == "customer" ? CustomerFields : PropertyFields;
+        var valid = fields.Select(f => f.Key).ToHashSet();
+        var strip = common is not null ? new HashSet<string> { "addr1", "addr2", "addr3", "addr4" } : new HashSet<string>();
+        var flats = rows.Select(r => r.Where(kv => valid.Contains(kv.Key) && !strip.Contains(kv.Key) && !string.IsNullOrWhiteSpace(kv.Value))
+                                       .ToDictionary(kv => kv.Key, kv => kv.Value)).ToList();
+        var present = flats.SelectMany(f => f.Keys).ToHashSet();
+        var cols = fields.Select(f => f.Key).Where(present.Contains).ToList();
+        return (cols, flats, common);
     }
 
-    public static (Dictionary<string, string> Values, UploadCommon Common) ParsePayload(string? payload)
+    /// <summary>payload → (행들, 공통 폼). 예전 형식(행 1건 = {values, common})도 읽는다</summary>
+    public static (List<Dictionary<string, string>> Rows, UploadCommon? Common) ParsePayload(string? payload)
     {
-        var values = new Dictionary<string, string>();
-        var common = new UploadCommon();
-        if (string.IsNullOrEmpty(payload)) return (values, common);
+        var rows = new List<Dictionary<string, string>>();
+        UploadCommon? common = null;
+        if (string.IsNullOrEmpty(payload)) return (rows, common);
         var node = JsonNode.Parse(payload) as JsonObject;
-        if (node?["values"] is JsonObject v)
-            foreach (var (k, x) in v) if (x is JsonValue jv) values[k] = jv.ToString();
-        if (node?["common"] is JsonObject c) common = c.Deserialize<UploadCommon>() ?? common;
-        return (values, common);
+        static Dictionary<string, string> Flat(JsonObject o) =>
+            o.Where(kv => kv.Value is JsonValue).ToDictionary(kv => kv.Key, kv => kv.Value!.ToString());
+        if (node?["rows"] is JsonArray arr) rows.AddRange(arr.OfType<JsonObject>().Select(Flat));
+        else if (node?["values"] is JsonObject v) rows.Add(Flat(v));
+        if (node?["common"] is JsonObject c) common = c.Deserialize<UploadCommon>();
+        return (rows, common);
     }
 }

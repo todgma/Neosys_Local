@@ -19,6 +19,7 @@
 | 첨부파일 | 사진·평면도·계약 첨부는 이 PC `%LOCALAPPDATA%\Neosys\files`에 저장, `sys_file`에 기록(2026-10-19 결정) |
 | 기준 데이터 | 공통코드(`sys_code_*`)는 로컬 DB에 시드로 포함. 법정동·단지는 서버 API로 조회 |
 | 스키마 출처 | 운영 DB를 **읽기 전용**으로 조회해 추출 (`tools/SchemaExport`) |
+| 이름 | 프로젝트·게시 exe는 **NeosysLight**(2026-11-03). 코드 네임스페이스(`Neosys.Local.*`), Core·Data·Tests 프로젝트, 데이터 폴더(`%LOCALAPPDATA%\Neosys`), 네트워크 공유 이름(`Neosys`)은 기존 이름 유지(바꾸면 기존 데이터·백업과 끊어짐) |
 | Git | 저장소 `https://github.com/todgma/Neosys_Local` (사용자가 생성). **커밋·푸시는 사용자가 직접** — 요청 없이 하지 말 것 |
 
 해석이 필요한 부분과 열린 질문은 `docs/ARCHITECTURE.md`의 "열린 질문"에 모아 둔다. 추측으로 진행하지 말고 사용자에게 확인한다.
@@ -42,10 +43,10 @@ Neosys_Local/
 ├─ tools/SchemaExport/       운영 PG → schema/ 추출 + SQLite DDL 변환 + 공통코드 시드 추출 도구
 ├─ schema/                   추출 결과(자동 생성, 직접 수정 금지)
 └─ src/
-   ├─ Neosys.Local.sln
+   ├─ NeosysLight.sln
    ├─ Neosys.Local.Core/     도메인 모델, 서비스(메뉴별), 서버 API 클라이언트, 공통 유틸
    ├─ Neosys.Local.Data/     SQLite 연결·DB 생성·이력 트리거·SpRunner·Row, Sql/Procs/*.sql(임베디드)
-   ├─ Neosys.Local.App/      WPF 화면 — Ui/(공통 부품), Views/<메뉴>/ — 단일 exe(Neosys.exe) 시작 프로젝트
+   ├─ NeosysLight/      WPF 화면 — Ui/(공통 부품), Views/<메뉴>/ — 단일 exe(NeosysLight.exe) 시작 프로젝트
    └─ Neosys.Local.Tests/    서비스·SQL 테스트(임시 SQLite 파일)
 ```
 
@@ -71,18 +72,21 @@ Neosys_Local/
 dotnet run --project tools/SchemaExport -- .
 
 # 빌드 / 테스트 / 실행
-dotnet build src/Neosys.Local.sln
+dotnet build src/NeosysLight.sln
 dotnet test src/Neosys.Local.Tests
-dotnet run --project src/Neosys.Local.App
+dotnet run --project src/NeosysLight
 
-# 단일 exe 배포 → publish/Neosys.exe (게시 프로필 Properties/PublishProfiles/SingleFile.pubxml — VS에서는 우클릭 → 게시)
-dotnet publish src/Neosys.Local.App -p:PublishProfile=SingleFile
+# 단일 exe 배포 → D:\Source\Release\NeosysLight\NeosysLight.exe (게시 프로필 Properties/PublishProfiles/SingleFile.pubxml — VS에서는 우클릭 → 게시)
+dotnet publish src/NeosysLight -p:PublishProfile=SingleFile
 
 # 화면 캡처(디버그 빌드 전용, 테스트 세션·견본 데이터, 서버 호출 없음)
-NEOSYS_DB=<임시.db> src/Neosys.Local.App/bin/Debug/net8.0-windows/Neosys.exe --snapshot property out.png first
+NEOSYS_DB=<임시.db> src/NeosysLight/bin/Debug/net8.0-windows/NeosysLight.exe --snapshot property out.png first
 
 # 버튼 전체 점검(디버그 빌드 전용, 점검용 DB 사본 사용 — 결과는 docs/BUTTON_AUDIT.md 형식)
-NEOSYS_DB=<점검용.db> src/Neosys.Local.App/bin/Debug/net8.0-windows/Neosys.exe --audit audit.txt [메뉴키]
+NEOSYS_DB=<점검용.db> src/NeosysLight/bin/Debug/net8.0-windows/NeosysLight.exe --audit audit.txt [메뉴키]
+
+# 화면 등록·삭제 점검(디버그 빌드 전용, 빈 점검용 DB — 메뉴마다 3건 등록·1건 삭제, 결과는 docs/CRUD_AUDIT.md 형식)
+NEOSYS_DB=<점검용.db> NEOSYS_FILES=<임시폴더> src/NeosysLight/bin/Debug/net8.0-windows/NeosysLight.exe --crud crud.txt [메뉴키]
 ```
 
 ## 현재 상태

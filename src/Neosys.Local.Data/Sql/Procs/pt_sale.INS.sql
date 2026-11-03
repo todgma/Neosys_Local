@@ -28,7 +28,7 @@ INSERT INTO pt_sale (
     exp_util_m, exp_util_y, exp_loan_m, exp_loan_y, exp_etc_m, exp_etc_y,
     zone_adjust, zone_overheat, zone_spec, zone_land_permit, build_permit, zone_dev_restrict,
     right_surface, right_grave, right_easement,
-    rt_no, off_no, reg_dt, reg_id
+    rt_no, off_no, reg_dt, upd_dt, reg_id
 ) VALUES (
     @pt_name, @pt_sts, @pt_type, @pt_expl, @sale_div, @addr1,
     @addr2, @addr3, @addr4, @addr5, @addr_post, @bjd_code,
@@ -57,5 +57,7 @@ INSERT INTO pt_sale (
     @exp_util_m, @exp_util_y, @exp_loan_m, @exp_loan_y, @exp_etc_m, @exp_etc_y,
     @zone_adjust, @zone_overheat, @zone_spec, @zone_land_permit, @build_permit, @zone_dev_restrict,
     @right_surface, @right_grave, @right_easement,
-    COALESCE(@rt_no, CAST(@session_rt_no AS TEXT)), COALESCE(@off_no, @session_off_no), datetime('now','localtime'), @session_user_id
+    COALESCE(@rt_no, CAST(@session_rt_no AS TEXT)), COALESCE(@off_no, @session_off_no),
+    -- 등록일/수정일: 엑셀 업로드(과거 데이터 이관)에서 넘긴 값, 없으면 지금(수정일은 비움)
+    COALESCE(NULLIF(@reg_dt, ''), datetime('now','localtime')), NULLIF(@upd_dt, ''), @session_user_id
 ) RETURNING pt_no;

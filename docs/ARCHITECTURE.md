@@ -9,7 +9,7 @@
 
 | 프로젝트 | 종류 | 역할 |
 | --- | --- | --- |
-| `Neosys.Local.App` | WPF (.NET 8, `net8.0-windows`) | 화면. 시작 프로젝트, 단일 exe(`Neosys.exe`)로 publish |
+| `NeosysLight` | WPF (.NET 8, `net8.0-windows`) | 화면. 시작 프로젝트, 단일 exe(`NeosysLight.exe`)로 publish |
 | `Neosys.Local.Core` | 클래스 라이브러리 | 메뉴별 서비스, 서버 API 클라이언트(`ServerApi`), 공통(`AppSession`·`LocalDate`·`Catalog`) |
 | `Neosys.Local.Data` | 클래스 라이브러리 | SQLite 연결·DB 생성·마이그레이션·이력 트리거(`LocalDatabase`), SP 실행기(`SpRunner`), 행 모델(`Row`), `Sql/**`(임베디드) |
 | `Neosys.Local.Tests` | xUnit | 서비스·SQL 테스트(테스트마다 임시 SQLite 파일) |
@@ -19,7 +19,7 @@
 
 ```
 src/
-├─ Neosys.Local.sln, global.json, Directory.Build.props
+├─ NeosysLight.sln, global.json, Directory.Build.props
 ├─ Neosys.Local.Data/
 │  ├─ LocalDatabase.cs      DB 파일 생성(schema.sql + Seed) → Migrations → *_hist 트리거 설치, digits() 함수 등록
 │  ├─ SpRunner.cs           Sql/Procs/<sp>.<모드>.sql 실행(파라미터 자동 바인딩·트랜잭션)
@@ -34,7 +34,7 @@ src/
 │  ├─ Server/ServerApi.cs   로그인·사무소·직원·메뉴권한·패스워드·가입비·상품가입·증빙파일·법정동·단지
 │  └─ Services/             Auth, Code, Customer, Property, Contract, Schedule, Interview, Vendor,
 │                           Expiry, Worklog, Memo, Neobot (+ ServiceBase, ChildSync)
-├─ Neosys.Local.App/
+├─ NeosysLight/
 │  ├─ App.xaml(.cs), AppServices.cs, Theme.xaml
 │  ├─ Ui/                   공통 화면 부품: FormBuilder(필드 정의 → 입력 폼), GridBuilder, ListPage, EditWindow,
 │  │                        FormEditWindow, ChildListEditor, RegionPicker(서버 법정동·단지), PickerDialog, SaleDivEditor …
@@ -45,7 +45,7 @@ src/
 ## 데이터 흐름
 
 ```
-[WPF 화면] ──▶ [서비스 (Core)] ──▶ [SpRunner (Data)] ──▶ SQLite (%LOCALAPPDATA%\Neosys\neosis_local.db)
+[WPF 화면] ──▶ [서비스 (Core)] ──▶ [SpRunner (Data)] ──▶ SQLite (%LOCALAPPDATA%\Neosys\accounts\<계정ID>\<계정ID>.db — 로그인 후 계정별로 염)
                      │
                      └─(서버가 필요한 기능)──▶ [ServerApi (Core)] ──HTTP──▶ https://api.neosis.kr
 ```
@@ -110,7 +110,7 @@ src/Neosys.Local.Data/Sql/Procs/
   → 메뉴를 누르면 메뉴마다 별도 창(`WindowManager.OpenMenu`: 기본 1400×700, 네오봇 520×825 여러 개, 메모 500×800).
   대시보드를 닫으면 앱 종료, 로그아웃하면 모든 창을 닫고 로그인으로.
 - 대시보드의 공지·이벤트·멤버십·인사말·비밀번호 재확인은 **서버 데이터라 운영 서버 API를 그대로 호출**한다(로컬에 다시 만들지 않음).
-  공동중개망·쪽지·대량문자 카드는 기존 배치대로 두고 "네오시스 웹에서 이용" 안내만 한다. 공지·이벤트 롤링 배너(5초, `RollingRules`)·로그인 후 팝업(`NoticePopupRules`, 숨김 기록 `%LOCALAPPDATA%\Neosys\notice_popup.json`)·커뮤니티 창(`Views/Community`, `CommunityRules`)·미션문구/리뷰이벤트·추천인 목록은 서버 API로 조회한다. 게시글·공지 내용(편집기 HTML)은 `Ui.HtmlView`(WebView2, 링크는 기본 브라우저). 맨 아래 [사무소관리 | 직원관리 | 가입비 및 상품결제](대표)는 비밀번호 확인 후 사무실관리 허브 창(`Views/Office/OfficeHubPage`)을 연다.
+  공동중개망·쪽지·대량문자 카드는 기존 배치대로 두고 "네오시스 웹에서 이용" 안내만 한다. 공지·이벤트 롤링 배너(5초, `RollingRules`)·로그인 후 팝업(`NoticePopupRules`, 숨김 기록 `%LOCALAPPDATA%\Neosys\notice_popup.json`)·커뮤니티 창(`Views/Community`, `CommunityRules`)·추천인 목록은 서버 API로 조회한다. 게시글·공지 내용(편집기 HTML)은 `Ui.HtmlView`(WebView2, 링크는 기본 브라우저). 맨 아래 [사무소관리 | 직원관리 | 가입비 및 상품결제](대표)는 비밀번호 확인 후 사무실관리 허브 창(`Views/Office/OfficeHubPage`)을 연다.
 - 색·모양은 기존 React(Tailwind) 값을 따른다(`Theme.xaml`: indigo-600 #4F46E5, 회색 바탕 #F9FAFB, 둥근 버튼,
   등록폼 라벨 #8B7AD8). 기존 화면 부품은 `Ui/LegacyControls.cs`(유형 버튼·구분 탭·면적/금액 필터 팝업·상담모드 토글), 알림은 `Toast`.
 - **글꼴·굵기·크기 기준(기존 `globals.css`·`tailwind.config.js`·`index.html`과 대조, 2026-10-20)**
@@ -152,14 +152,24 @@ src/Neosys.Local.Data/Sql/Procs/
 ## 단일 exe 배포
 
 ```bash
-dotnet publish src/Neosys.Local.App -c Release -o publish
+dotnet publish src/NeosysLight -c Release -o publish
 ```
 
 - Release 설정(csproj)에 `win-x64`·self-contained·`PublishSingleFile`·`IncludeNativeLibrariesForSelfExtract`·압축이 들어 있다.
-  결과는 `publish/Neosys.exe` 1개(약 73MB). pdb는 만들지 않는다(`Directory.Build.props`).
+  결과는 `D:\Source\Release\NeosysLight\NeosysLight.exe` 1개(약 73MB). pdb는 만들지 않는다(`Directory.Build.props`).
 - 첫 실행 시 DB 파일이 없으면 임베디드 `schema.sql` + 시드로 만들고, 이후 `Sql/Migrations`를 `PRAGMA user_version` 순서로 적용한다.
-- 개발용 환경변수: `NEOSYS_DB`(DB 파일 경로), `NEOSYS_API`(서버 주소).
-- 디버그 빌드 전용 화면 캡처: `Neosys.exe --snapshot <메뉴키> <출력.png> [new|first]` — 테스트 세션·견본 데이터로 화면을 PNG로 저장한다
+- 개발용 환경변수: `NEOSYS_DB`(DB 파일 경로 — 지정하면 계정과 무관하게 그 파일), `NEOSYS_FILES`(첨부 폴더), `NEOSYS_API`(서버 주소).
+
+### 자동 업데이트 (2026-10-23)
+
+- 버전 = `NeosysLight.csproj`의 `<Version>`. 서버 `app_version_light`(원본 프로그램의 `app_version`과 분리)를 `GET /api/version/light/latest?platform=win`으로 조회 — 서버 DDL·API 변경안은 `docs/server/`.
+- 시작 순서: 로컬 DB 준비 → **업데이트 확인(8초 안에 응답 없으면 건너뜀)** → 로그인. 더 새 버전이면 묻지 않고 진행 창을 띄워
+  `%LOCALAPPDATA%\Neosys\update\Neosys-<버전>.exe`로 받고, exe인지 확인(100KB 이상 + MZ) → 교체 스크립트(`swap.ps1`, PowerShell)를 띄우고 프로그램 종료.
+  스크립트는 프로그램이 끝나기를 기다렸다가 현재 exe를 `NeosysLight.exe.old`로 바꾸고 새 exe를 복사한 뒤 다시 실행한다(복사 실패 시 원래 exe로 되돌림). `.old`는 다음 실행 때 지운다.
+- 서버 연결 실패·버전 없음 → 그냥 시작. 받기·확인 실패 → 알리고 지금 버전으로 시작. exe 폴더에 쓰기 권한이 없으면 받은 파일 폴더를 열어 직접 바꾸게 한다.
+- 디버그 빌드는 확인하지 않는다. `NEOSYS_FORCE_UPDATE=1`이면 확인·내려받기까지만 하고 교체는 하지 않는다(원본 드라이런).
+- 규칙(버전 비교·판단·스크립트)은 `Core/Services/UpdateRules.cs`, 화면은 `App/Views/UpdateWindow.cs`. 스냅샷: `--snapshot update`.
+- 디버그 빌드 전용 화면 캡처: `NeosysLight.exe --snapshot <메뉴키> <출력.png> [new|first]` — 테스트 세션·견본 데이터로 화면을 PNG로 저장한다
   (서버는 부르지 않음). 메뉴키는 `Views/MenuRegistry.cs`.
 
 ## 질문과 답
@@ -170,7 +180,7 @@ dotnet publish src/Neosys.Local.App -c Release -o publish
 | 2 | 로컬↔서버 동기화 | 공동중개망 데이터 전송에만 서버 API 사용(추후). 그 외는 로컬 전용 |
 | 3 | 로그인 | **서버 계정 로그인**(`/api/realestaters/login`) |
 | 4 | 초기 데이터 | 공통코드·메뉴·계약서 서식은 로컬 시드. 법정동·단지는 **서버 API로 조회**. 운영 업무 데이터는 가져오지 않음(빈 DB 시작) |
-| 5 | Electron 전용 기능(PC폰·원격지원·자동 업데이트) | 이관 제외 |
+| 5 | Electron 전용 기능(PC폰·원격지원·자동 업데이트) | 이관 제외. 단 자동 업데이트는 2026-10-23 서버 `app_version_light` 방식으로 새로 구현("자동 업데이트") |
 | 6 | 관리자 웹(ADMIN) | 이관 제외 |
 | 7 | 이관 범위 | 공동중개망·쪽지·커뮤니티·공지·고객센터·결제·대량문자·PC폰 제외, 로컬 업무 메뉴만 |
 | 8 | 첨부파일(사진·평면도·계약 첨부) | **이 PC 폴더**(`%LOCALAPPDATA%\Neosys\files`)에 저장하고 `sys_file`에 기록 |
@@ -182,3 +192,6 @@ dotnet publish src/Neosys.Local.App -c Release -o publish
 - **자사매칭 규칙**(2026-10-20): 기존 물건 목록 '자사매칭/공동망매칭', 고객 목록 '매칭(자사 n / 공동 n)' 칸은 화면만 있고
   서버에 계산 로직이 없다(항상 '-'·0). 어떤 조건(물건유형·거래유형·금액·면적·희망지역 등)이 맞으면 매칭으로 셀지 정해 주셔야 구현할 수 있다. 현재 미구현.
 - 부속문서·거래관련서식 인쇄 모양: 현재는 항목표 형태로 인쇄한다. 정부 서식(확인설명서 등) 모양 그대로 재현이 필요한지.
+- **소유자 표 '통신사'**(2026-10-27): 기존 HolderCombinedCard에 칸은 있지만 서버 API·DB(`pt_sale_holder`)에 칸이 없어 저장되지 않는다.
+  로컬도 같게 화면에만 둠(저장 안 됨). 저장하려면 로컬 마이그레이션으로 `holder_telecom` 칸 추가 여부를 정해 주셔야 한다.
+- **추천인 기간 연장**(2026-11-02): 가입 시 서버가 `referral_benefits`에 추천인 행(free_days 30)을 넣지만, 만료일 계산(`GetOfficeMembership`)은 `membership_history`만 더해서 **기간이 늘어나지 않는다**. 연장 대상은 **추천인만**으로 결정(2026-11-02, 사용자). 서버 `ProcessReferralCode`에서 추천인 사무소(`OffNo`)로 `membership_history`(kind `REWARD`, add_days 30)를 넣는 수정이 필요하며 아직 반영되지 않았다. 로컬 앱은 코드를 보내기만 하므로 앱 수정은 없다.

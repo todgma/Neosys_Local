@@ -6,16 +6,19 @@ namespace Neosys.Local.Core.Services;
 /// <summary>
 /// 서버 계정 로그인. 서버가 확인한 중개사·사무소 정보를 로컬 rt_realtor_info / ofc_realter_office에 저장(비밀번호 제외)하고
 /// 세션을 만든다. 로컬 데이터는 이 세션의 RtNo·OffNo로 저장·조회한다.
+/// 로컬 DB는 계정별이라 로그인 전에는 없다 — 서버 확인 후 openLocal로 그 계정 DB를 연 다음 저장한다.
 /// </summary>
 public sealed class AuthService
 {
     private readonly ServerApi _server;
-    private readonly SpRunner _sp;
+    private readonly Func<SpRunner> _spAccessor;
+    private SpRunner _sp => _spAccessor();
 
-    public AuthService(ServerApi server, SpRunner sp)
+    /// <param name="sp">현재 계정 DB의 SpRunner(로그인 후 계정 DB를 열면 바뀌므로 호출 시점에 가져온다)</param>
+    public AuthService(ServerApi server, Func<SpRunner> sp)
     {
         _server = server;
-        _sp = sp;
+        _spAccessor = sp;
     }
 
     /// <summary>사무소 정보를 서버에서 다시 받아 로컬(ofc_realter_office)에 반영 — 사무소 정보 수정 후</summary>
@@ -29,7 +32,8 @@ public sealed class AuthService
         session.Greeting = office.Str("greeting");
     }
 
-    public async Task<AppSession> LoginAsync(string id, string pw)
+    /// <param name="openLocal">서버 로그인 성공 직후, 로컬 저장 전에 호출 — 그 계정의 로컬 DB를 연다</param>
+    public async Task<AppSession> LoginAsync(string id, string pw, Func<AppSession, Task>? openLocal = null)
     {
         if (string.IsNullOrWhiteSpace(id) || string.IsNullOrEmpty(pw))
             throw new ServerApiException("아이디와 비밀번호를 입력해 주세요.");
@@ -49,6 +53,7 @@ public sealed class AuthService
             ReferralCode = rt.Str("referralCode"),
         };
 
+        if (openLocal is not null) await openLocal(session);
         await _sp.ExecuteAsync("rt_realtor_info", "UPSERT", rt);
 
         var office = await _server.GetUserOfficeAsync(session.UserId);

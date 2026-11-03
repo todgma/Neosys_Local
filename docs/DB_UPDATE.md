@@ -17,7 +17,7 @@ SQL 파일은 모두 **임베디드 리소스**로 exe 안에 들어간다(`Neos
 
 ## DB 파일 위치
 
-- 기본: `%LOCALAPPDATA%\Neosys\neosis_local.db` (WAL 모드라 `-wal`·`-shm` 파일이 옆에 생긴다)
+- 기본: 계정별 `%LOCALAPPDATA%\Neosys\accounts\<계정ID>\<계정ID>.db` — 로그인 성공 후 연다(WAL 모드라 `-wal`·`-shm` 파일이 옆에 생긴다). 예전 단일 DB `neosis_local.db`는 첫 로그인 때 그 계정으로 옮길지 묻는다(`AccountStore`, docs/DB_BACKUP.md).
 - 개발·테스트: 환경변수 `NEOSYS_DB=<경로>`로 다른 파일을 쓴다 — 실제 데이터 DB를 건드리지 않고 마이그레이션을 시험할 때 쓴다.
 
 ## 실행할 때 일어나는 일 (`LocalDatabase.Initialize`)
@@ -107,6 +107,6 @@ SQL 파일은 모두 **임베디드 리소스**로 exe 안에 들어간다(`Neos
 1. 테이블 변경이 있으면 `Sql/Migrations/다음번호_설명.sql` 작성(`X_hist`도 같이)
 2. 관련 `Sql/Procs/*.sql`, 서비스, 화면 수정
 3. `dotnet test src/Neosys.Local.Tests` 통과
-4. 실제 DB 사본으로 `NEOSYS_DB=<사본> Neosys.exe` 실행 → 시작 오류 없음, `PRAGMA user_version`이 새 번호인지 확인
-5. `dotnet publish src/Neosys.Local.App -p:PublishProfile=SingleFile` → `publish/Neosys.exe` 배포
+4. 실제 DB 사본으로 `NEOSYS_DB=<사본> NeosysLight.exe` 실행 → 시작 오류 없음, `PRAGMA user_version`이 새 번호인지 확인
+5. `dotnet publish src/NeosysLight -p:PublishProfile=SingleFile` → `D:\Source\Release\NeosysLight\NeosysLight.exe` 배포
 6. 사용자 PC: exe 교체 후 실행하면 1~3단계(생성·마이그레이션·트리거)가 자동으로 실행된다

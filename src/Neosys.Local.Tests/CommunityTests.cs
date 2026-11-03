@@ -48,40 +48,27 @@ public class CommunityTests
 
         await api.GetEventListAsync(isPublic: true, isPopup: true, rows: 50);
         Assert.EndsWith("/api/admin/events?rowsPerPage=50&isPublic=Y&isPopup=Y", fake.Calls[2].Url);
-        await api.GetEventListAsync(isPublic: true, isParticipatory: true, rows: 100);
-        Assert.EndsWith("&isPublic=Y&isParticipatory=Y", fake.Calls[3].Url);
 
         var jobs = await api.GetJobListAsync("구인", " 강남 ");
         Assert.Equal("강남부동산", CommunityRules.Fields(jobs.Single())["사무소명칭"]);
-        Assert.Contains("kind=%EA%B5%AC%EC%9D%B8&q=%EA%B0%95%EB%82%A8", fake.Calls[4].Url);   // 구인 · 강남(공백 제거)
+        Assert.Contains("kind=%EA%B5%AC%EC%9D%B8&q=%EA%B0%95%EB%82%A8", fake.Calls[3].Url);   // 구인 · 강남(공백 제거)
 
         Assert.Empty(await api.GetCommunityListAsync(CommunityRules.Office, null));            // 0건 = 빈 목록
-        Assert.Contains("tab=%EC%82%AC%EB%AC%B4%EC%86%8C%20%EB%A7%A4%EC%88%98%2F%EB%A7%A4%EB%8F%84", fake.Calls[5].Url);
+        Assert.Contains("tab=%EC%82%AC%EB%AC%B4%EC%86%8C%20%EB%A7%A4%EC%88%98%2F%EB%A7%A4%EB%8F%84", fake.Calls[4].Url);
     }
 
     [Fact]
-    public async Task 이벤트_참여_제출_요청()
+    public async Task 스토리지_업로드_요청()
     {
         var fake = new Fake(r => r.RequestUri!.AbsolutePath.EndsWith("/presign")
             ? "{\"success\":true,\"data\":{\"objectKey\":\"ev/1.png\",\"uploadUrl\":\"https://storage.test/put\"}}"
-            : r.RequestUri.Host == "storage.test" ? "" : "{\"success\":true,\"data\":{\"entryId\":1}}");
+            : "");
         var api = new ServerApi("http://test.local", fake);
         var meta = await api.UploadToStorageAsync("SYFDV08", "후기.PNG", new byte[300], "image/png", 5 * 1024 * 1024);
         Assert.Equal("ev/1.png", meta.Str("objectKey"));
         Assert.Equal("png", meta.Str("ext"));
         Assert.Equal("https://storage.test/put", fake.Calls[1].Url);
         await Assert.ThrowsAsync<ServerApiException>(() => api.UploadToStorageAsync("SYFDV08", "big.png", new byte[5 * 1024 * 1024 + 1], "image/png", 5 * 1024 * 1024));
-
-        await api.SubmitEventEntryAsync(7, 100000010, 300000016, "tester", "테스터", null, new[] { meta });
-        var (m, url, body) = fake.Calls.Last();
-        Assert.Equal(HttpMethod.Post, m);
-        Assert.EndsWith("/api/events/entries", url);
-        var j = JsonDocument.Parse(body!).RootElement;
-        // 본문은 camelCase(서버 모델 바인딩은 대소문자 무시)
-        static JsonElement P(JsonElement o, string n) => o.EnumerateObject().First(p => string.Equals(p.Name, n, StringComparison.OrdinalIgnoreCase)).Value;
-        Assert.Equal(7, P(j, "EventId").GetInt64());
-        Assert.Equal("ev/1.png", P(P(j, "Files")[0], "ObjectKey").GetString());
-        Assert.Equal(JsonValueKind.Null, P(j, "Content").ValueKind);
     }
 
     private static JsonElement P(JsonElement o, string n) => o.EnumerateObject().First(p => string.Equals(p.Name, n, StringComparison.OrdinalIgnoreCase)).Value;

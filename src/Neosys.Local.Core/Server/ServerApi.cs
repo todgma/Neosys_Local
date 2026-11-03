@@ -44,6 +44,38 @@ public sealed class ServerApi
         return ToRow(data);
     }
 
+    /// <summary>
+    /// 아이디 사용 가능 여부(GET /api/realestaters/CheckRealestaterId) — 서버는 중복이어도 success=true이고 data=true(사용 중)로 알린다.
+    /// data를 봐야 한다(기존 프런트는 success만 봐서 항상 '사용 가능'으로 나왔다).
+    /// </summary>
+    public async Task<bool> IsIdAvailableAsync(string id)
+    {
+        var body = await SendAsync(HttpMethod.Get, $"api/realestaters/CheckRealestaterId?id={Uri.EscapeDataString(id)}");
+        return Unwrap(body, "아이디 중복확인에 실패했습니다.").ValueKind != JsonValueKind.True;
+    }
+
+    /// <summary>추천인 코드 확인(GET /api/realestaters/referral-info) — 결과: rtNm(대표자)·offNm(사무소). 유효하지 않으면 null</summary>
+    public async Task<Row?> GetReferralInfoAsync(string code)
+    {
+        var body = await SendAsync(HttpMethod.Get, $"api/realestaters/referral-info?code={Uri.EscapeDataString(code)}");
+        try
+        {
+            var data = Unwrap(body, "추천인 코드 확인에 실패했습니다.");
+            return data.ValueKind == JsonValueKind.Object && Prop(data, "valid") is { ValueKind: JsonValueKind.True } ? ToRow(data) : null;
+        }
+        catch (ServerApiException e) when (e.Code == "INVALID_REFERRAL") { return null; }
+    }
+
+    /// <summary>
+    /// 회원가입(POST /api/realestaters) — 본문은 SignupRules.BuildRequest. 추천인 코드(ReferralCode)가 있으면 서버가 referral_benefits에 추천인 행을 넣는다
+    /// (서버에서 처리, 실패해도 가입은 성공으로 응답한다).
+    /// </summary>
+    public async Task SignUpAsync(IReadOnlyDictionary<string, object?> request)
+    {
+        var body = await SendAsync(HttpMethod.Post, "api/realestaters", request);
+        Unwrap(body, "회원가입에 실패했습니다.");
+    }
+
     /// <summary>로그인 ID로 소속 사무소 조회. 없으면 null</summary>
     public async Task<Row?> GetUserOfficeAsync(string userId)
     {
@@ -172,13 +204,13 @@ public sealed class ServerApi
     }
 
     /// <summary>
-    /// 이벤트 목록(GET /api/admin/events) — 조건: 공개(isPublic)·팝업(isPopup)·대시보드 표시(showDashboard)·참여형(isParticipatory), 'Y'만 보낸다.
+    /// 이벤트 목록(GET /api/admin/events) — 조건: 공개(isPublic)·팝업(isPopup)·대시보드 표시(showDashboard), 'Y'만 보낸다.
     /// 결과: eventId, title, content, regDt, startDate, endDate, viewCount, linkUrl, popupW/H
     /// </summary>
-    public async Task<List<Row>> GetEventListAsync(bool isPublic = true, bool isPopup = false, bool showDashboard = false, bool isParticipatory = false, int rows = 200)
+    public async Task<List<Row>> GetEventListAsync(bool isPublic = true, bool isPopup = false, bool showDashboard = false, int rows = 200)
     {
         var q = $"api/admin/events?rowsPerPage={rows}" + (isPublic ? "&isPublic=Y" : "") + (isPopup ? "&isPopup=Y" : "")
-                + (showDashboard ? "&showDashboard=Y" : "") + (isParticipatory ? "&isParticipatory=Y" : "");
+                + (showDashboard ? "&showDashboard=Y" : "");
         var body = await SendAsync(HttpMethod.Get, q);
         var data = Unwrap(body, "이벤트 조회 실패", allowEmpty: true);
         if (data.ValueKind != JsonValueKind.Object) return new();
@@ -219,6 +251,45 @@ public sealed class ServerApi
         var body = await SendAsync(HttpMethod.Get, $"api/community/job/{postId}" + Viewer(viewerId));
         var data = Unwrap(body, "게시글 조회 실패", allowEmpty: true);
         return data.ValueKind == JsonValueKind.Object ? ToRow(data) : null;
+    }
+
+    // ---------------- 자동 업데이트(로그인 전) ----------------
+
+    /// <summary>
+    /// 로컬(라이트) 프로그램 최신 버전(GET /api/version/light/latest?platform= — 서버 app_version_light, docs/server/APP_VERSION_LIGHT.md).
+    /// 결과: version, downloadUrl, mandatory, releaseNote. 등록된 버전이 없으면 null
+    /// </summary>
+    public async Task<Row?> GetLatestLightVersionAsync(string platform = "win")
+    {
+        var body = await SendAsync(HttpMethod.Get, $"api/version/light/latest?platform={Uri.EscapeDataString(platform)}");
+        var data = Unwrap(body, "버전 확인 실패", allowEmpty: true);
+        return data.ValueKind == JsonValueKind.Object ? ToRow(data) : null;
+    }
+
+    /// <summary>새 exe 내려받기(진행률 0~1 보고). 주소는 버전 API가 준 download_url</summary>
+    public async Task DownloadFileAsync(string url, string path, IProgress<double>? progress = null, CancellationToken ct = default)
+    {
+        try
+        {
+            using var res = await _storage.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
+            if (!res.IsSuccessStatusCode) throw new ServerApiException($"다운로드에 실패했습니다({(int)res.StatusCode}).", "DOWNLOAD");
+            var total = res.Content.Headers.ContentLength ?? 0;
+            await using var src = await res.Content.ReadAsStreamAsync(ct);
+            await using var dst = File.Create(path);
+            var buf = new byte[81920];
+            long done = 0;
+            int n;
+            while ((n = await src.ReadAsync(buf, ct)) > 0)
+            {
+                await dst.WriteAsync(buf.AsMemory(0, n), ct);
+                done += n;
+                if (total > 0) progress?.Report((double)done / total);
+            }
+        }
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
+        {
+            throw new ServerApiException("다운로드에 실패했습니다.\n" + e.Message, "NETWORK");
+        }
     }
 
     // ---------------- 커뮤니티 글쓰기·삭제(서버 쓰기 — 운영 서버에 바로 반영) ----------------
@@ -287,20 +358,7 @@ public sealed class ServerApi
         return data.ValueKind == JsonValueKind.Object && Prop(data, "referredUsers") is { ValueKind: JsonValueKind.Array } arr ? ToRows(arr) : new();
     }
 
-    /// <summary>
-    /// 이벤트 참여 제출(POST /api/events/entries) — 리뷰이벤트는 content(링크), 미션문구는 files(스토리지에 올린 파일 메타). 다시 제출하면 서버가 교체(upsert).
-    /// </summary>
-    public async Task SubmitEventEntryAsync(long eventId, long? offNo, long? rtNo, string userId, string? userNm, string? content, IEnumerable<Row> files)
-    {
-        var body = await SendAsync(HttpMethod.Post, "api/events/entries", new
-        {
-            EventId = eventId, OffNo = offNo, RtNo = rtNo, UserId = userId, UserNm = userNm, Content = content,
-            Files = files.Select(f => new { ObjectKey = f.Str("objectKey"), OrigName = f.Str("origName"), ContentType = f.Str("contentType"), FileSize = f.Long("fileSize"), Ext = f.Str("ext") }).ToList(),
-        });
-        Unwrap(body, "제출에 실패했습니다.");
-    }
-
-    /// <summary>파일만 스토리지에 올리고 메타를 돌려준다(서버 sys_file 등록 없음 — 이벤트 제출처럼 다른 API가 메타를 저장할 때). 결과: objectKey, origName, contentType, fileSize, ext</summary>
+    /// <summary>파일만 스토리지에 올리고 메타를 돌려준다(서버 sys_file 등록 없음 — 회원가입처럼 다른 API가 메타를 저장할 때). 결과: objectKey, origName, contentType, fileSize, ext</summary>
     public async Task<Row> UploadToStorageAsync(string fileDiv, string fileName, byte[] content, string? contentType, long maxBytes = MaxUploadBytes)
     {
         if (content.LongLength > maxBytes) throw new ServerApiException($"파일 용량은 {maxBytes / 1024 / 1024}MB를 초과할 수 없습니다.", "FILE_TOO_LARGE");
@@ -349,6 +407,13 @@ public sealed class ServerApi
             return row.Has("ProdName") || row.Has("prodName") ? row : null;
         }
         catch (ServerApiException) { return null; }
+    }
+
+    /// <summary>멤버십 변동 이력(GET /api/admin/memberships/office/{offNo}/history) — 결과: Kind(JOIN·EVENT·REWARD)·Title·Qty·Unit·AddDays·RegDt, 최신순</summary>
+    public async Task<List<Row>> GetMembershipHistoryAsync(long offNo)
+    {
+        var body = await SendAsync(HttpMethod.Get, $"api/admin/memberships/office/{offNo}/history");
+        return Items(Unwrap(body, "무료개월 내역 조회 실패", allowEmpty: true));
     }
 
     /// <summary>대시보드 인사말 저장(사무소 공유) — PUT /api/office/{offNo}/greeting</summary>
