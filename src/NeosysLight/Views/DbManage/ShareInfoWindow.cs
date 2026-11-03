@@ -6,7 +6,7 @@ using Neosys.Local.Core.Services;
 namespace Neosys.Local.App.Views.DbManage;
 
 /// <summary>
-/// 공유 정보 알림 — 이 PC에서 처음 로그인할 때 공유를 자동으로 켠 뒤(FirstRunSetup) 한 번 띄운다. 탭 2개:
+/// 공유 정보 알림 — 이 PC에서 처음 로그인할 때 진행 창(FirstRunWindow)으로 공유를 켠 뒤 한 번 띄운다. 탭 2개:
 ///   공유정보: 설정 결과, 다른 PC에 등록할 주소, 공유 상태, 다시 설정
 ///   데이터베이스 백업: 백업 위치·상태, 백업 설정(DB 관리 창과 같은 패널)
 /// 설정 페이지(DB 관리 창)는 그대로 두고, 여기서 바꾼 값도 settings.json에 바로 저장한다.
@@ -24,19 +24,10 @@ public sealed class ShareInfoWindow : Window
     private ShareStatus? _netStatus;
     private FirstRunResult _setup;
 
-    /// <summary>최초 실행이면 공유를 켜고(관리자 권한 확인 창 한 번) 결과를 띄운다. 실패해도 프로그램은 그대로 쓴다.</summary>
-    public static async Task ShowIfFirstRunAsync(Window owner)
+    /// <summary>최초 실행 공유 설정(FirstRunWindow)이 끝난 뒤 결과를 띄운다. 실패해도 프로그램은 그대로 쓴다.</summary>
+    public static void ShowResult(Window owner, FirstRunResult result)
     {
-        // NEOSYS_DB(개발·점검용 임시 DB)로 실행할 때는 이 PC의 공유 설정을 건드리지 않는다
-        if (Environment.GetEnvironmentVariable("NEOSYS_DB") is not null || !FirstRunSetup.ShouldRun(AppServices.Settings)) return;
-        try
-        {
-            var result = await FirstRunSetup.RunAsync(AppServices.Settings, AppServices.ShareFolder, AppServices.Session.UserId,
-                f => Task.Run(() => NetworkShare.Check(f).Ready),
-                f => NetworkShare.EnableAsync(f, makePrivate: false),   // 네트워크 종류는 자동으로 바꾸지 않는다(공용 와이파이를 '개인'으로 만들 수 있어서) — 창에서 [공유설정]으로
-                AppServices.Settings.Save);
-            if (owner.IsLoaded) new ShareInfoWindow(result) { Owner = owner }.Show();
-        }
+        try { new ShareInfoWindow(result) { Owner = owner }.Show(); }
         catch (Exception ex) { Dialogs.Warn("공유 정보를 표시하지 못했습니다.\n" + ex.Message, "공유 정보"); }
     }
 

@@ -56,6 +56,19 @@ public static class BackupScheduler
             }
             catch { /* 다음 로그인 때 다시 */ }
         });
+#if !DEBUG
+        // 작업 스케줄러 백업이 지금 exe를 가리키는지(디버그 빌드는 bin 경로가 등록되지 않게 건너뜀)
+        if (AppServices.Settings.ScheduledBackup && Environment.ProcessPath is { } exe
+            && !Path.GetFileName(exe).Equals("dotnet.exe", StringComparison.OrdinalIgnoreCase))
+        {
+            var minutes = AppServices.Settings.BackupIntervalMinutes;
+            _ = Task.Run(() =>
+            {
+                try { ScheduledBackupTask.Repair(exe, session.UserId, minutes, ScheduledBackupTask.RegisteredCommand, ScheduledBackupTask.Register); }
+                catch { /* DB 관리 창에 상태가 표시된다 */ }
+            });
+        }
+#endif
 
         Arm(first: true);
         StatusChanged?.Invoke();

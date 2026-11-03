@@ -122,6 +122,17 @@ internal static class DevSnapshot
                     Save(w, output);
                     Environment.Exit(0);
                 }
+                if (key == "firstrun")
+                {
+                    // 최초 실행 공유 설정 진행 창(공유를 켜지 않음, 표시만) — mode = 단계(Folder·Check·Enable·Verify, 기본 Enable)
+                    var w = new Views.DbManage.FirstRunWindow { ShowActivated = false };
+                    w.SetStep(Enum.TryParse<FirstRunStep>(mode, out var step) ? step : FirstRunStep.Enable);
+                    app.MainWindow = w;
+                    w.Show();
+                    await Delay(800);
+                    Save(w, output);
+                    Environment.Exit(0);
+                }
                 if (key == "upload")
                 {
                     // 엑셀 일괄 업로드 창(mode = property|customer, 기본 property) — 견본 붙여넣기 상태(서버 호출 없음)

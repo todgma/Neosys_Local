@@ -94,6 +94,33 @@ public static class ScheduledBackupTask
 
     public static bool Exists(string userId) => Schtasks($"/Query /TN \"{TaskName(userId)}\"").Code == 0;
 
+    /// <summary>등록된 작업이 실행하는 exe 경로(작업이 없으면 null)</summary>
+    public static string? RegisteredCommand(string userId)
+    {
+        var (code, output) = Schtasks($"/Query /TN \"{TaskName(userId)}\" /XML");
+        return code == 0 ? CommandFromXml(output) : null;
+    }
+
+    public static string? CommandFromXml(string xml)
+    {
+        try
+        {
+            return System.Xml.Linq.XDocument.Parse(xml).Descendants().FirstOrDefault(e => e.Name.LocalName == "Command")?.Value.Trim().Trim('"');
+        }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// 로그인할 때 — 켜져 있는데 작업이 없거나 다른 exe를 가리키면(exe를 옮겼거나 이름이 바뀐 경우: Neosys.exe → NeosysLight.exe) 지금 exe로 다시 등록한다.
+    /// 그대로 두면 재부팅 뒤 작업이 없는 파일을 실행하려다 조용히 실패해 백업이 멈춘다. 고쳤으면 true
+    /// </summary>
+    public static bool Repair(string exePath, string userId, int intervalMinutes, Func<string, string?> registeredCommand, Func<string, string, int, string?> register)
+    {
+        var current = registeredCommand(userId);
+        if (current is not null && string.Equals(Path.GetFullPath(current), Path.GetFullPath(exePath), StringComparison.OrdinalIgnoreCase)) return false;
+        return register(exePath, userId, intervalMinutes) is null;
+    }
+
     private static (int Code, string Output) Schtasks(string args)
     {
         try

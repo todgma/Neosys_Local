@@ -178,4 +178,71 @@ public class SignupAndFirstRunTests : IDisposable
         r = await FirstRunSetup.RunAsync(new AppSettings(), Path.Combine(_dir, "N"), "tester", _ => throw new IOException("읽기 실패"), _ => Task.FromResult<string?>(null), () => throw new IOException("저장 실패"));
         Assert.Equal("읽기 실패", r.Error);
     }
+
+    [Fact]
+    public async Task 최초실행_단계를_차례로_알리고_끝에_완료()
+    {
+        var steps = new List<FirstRunStep>();
+        var shared = false;
+        await FirstRunSetup.RunAsync(new AppSettings(), Path.Combine(_dir, "N"), "tester", _ => Task.FromResult(shared),
+            _ => { shared = true; return Task.FromResult<string?>(null); }, () => { }, steps.Add);
+        Assert.Equal(new[] { FirstRunStep.Folder, FirstRunStep.Check, FirstRunStep.Enable, FirstRunStep.Verify, FirstRunStep.Done }, steps);
+
+        // 이미 공유돼 있으면 켜기 단계 없이 완료
+        steps.Clear();
+        await FirstRunSetup.RunAsync(new AppSettings(), Path.Combine(_dir, "N"), "tester", _ => Task.FromResult(true), _ => Task.FromResult<string?>(null), () => { }, steps.Add);
+        Assert.Equal(new[] { FirstRunStep.Folder, FirstRunStep.Check, FirstRunStep.Done }, steps);
+    }
+
+    [Fact]
+    public async Task 최초실행_공유켜기가_끝나지_않으면_기다리지_않고_실패()
+    {
+        var s = new AppSettings();
+        var never = new TaskCompletionSource<string?>();   // 관리자 권한 스크립트가 멈춘 경우
+        var steps = new List<FirstRunStep>();
+        var r = await FirstRunSetup.RunAsync(s, Path.Combine(_dir, "N"), "tester", _ => Task.FromResult(false), _ => never.Task, () => { }, steps.Add, TimeSpan.FromMilliseconds(50));
+        Assert.False(r.Ready);
+        Assert.Contains("끝나지 않았습니다", r.Error);
+        Assert.False(FirstRunSetup.ShouldRun(s));            // 진행 창이 닫히고 프로그램을 쓸 수 있게 된다
+        Assert.Equal(FirstRunStep.Done, steps[^1]);
+    }
+
+    [Fact]
+    public void 설정_저장은_바꿔넣기_본파일이_깨지면_사본에서_읽음()
+    {
+        Directory.CreateDirectory(_dir);
+        var path = Path.Combine(_dir, "settings.json");
+        new AppSettings { ShareFolder = @"D:\Neosys", FirstRunSetupDone = true }.Save(path);
+        Assert.False(File.Exists(path + ".tmp"));
+        new AppSettings { ShareFolder = @"E:\Neosys", FirstRunSetupDone = true }.Save(path);
+        Assert.Equal(@"E:\Neosys", AppSettings.Load(path).ShareFolder);
+        Assert.Equal(@"D:\Neosys", AppSettings.Load(AppSettings.BackupPath(path)).ShareFolder);   // 직전 설정 사본
+
+        // 저장 중 전원이 꺼져 본 파일이 비거나 깨진 경우 — 기본값으로 돌아가지 않고 사본을 읽는다
+        File.WriteAllBytes(path, new byte[64]);
+        var loaded = AppSettings.Load(path);
+        Assert.Equal(@"D:\Neosys", loaded.ShareFolder);
+        Assert.True(loaded.FirstRunSetupDone);
+
+        File.WriteAllText(AppSettings.BackupPath(path), "{ 깨짐");
+        Assert.Null(AppSettings.Load(path).ShareFolder);                                       // 둘 다 깨졌으면 기본값
+    }
+
+    [Fact]
+    public void 작업스케줄러_exe가_바뀌었으면_다시_등록()
+    {
+        const string xml = """
+<?xml version="1.0" encoding="UTF-16"?>
+<Task xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task"><Actions><Exec><Command>C:\App\Neosys.exe</Command><Arguments>--backup "a"</Arguments></Exec></Actions></Task>
+""";
+        Assert.Equal(@"C:\App\Neosys.exe", ScheduledBackupTask.CommandFromXml(xml));
+        Assert.Null(ScheduledBackupTask.CommandFromXml("오류: 작업이 없습니다"));
+
+        var registered = new List<string>();
+        string? Reg(string exe, string user, int min) { registered.Add(exe); return null; }
+        Assert.False(ScheduledBackupTask.Repair(@"c:\app\NEOSYS.exe", "a", 120, _ => @"C:\App\Neosys.exe", Reg));   // 같은 exe(대소문자 무시)
+        Assert.True(ScheduledBackupTask.Repair(@"C:\App\NeosysLight.exe", "a", 120, _ => @"C:\App\Neosys.exe", Reg)); // 이름이 바뀐 exe
+        Assert.True(ScheduledBackupTask.Repair(@"C:\App\NeosysLight.exe", "a", 120, _ => null, Reg));                 // 켜져 있는데 작업이 없음
+        Assert.Equal(new[] { @"C:\App\NeosysLight.exe", @"C:\App\NeosysLight.exe" }, registered);
+    }
 }

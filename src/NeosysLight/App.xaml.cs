@@ -81,8 +81,10 @@ public partial class App : Application
             if (main.LogoutRequested) ShowLogin();
             else Shutdown();
         };
+        // 이 PC에서 처음이면 진행 창으로 공유를 켠다 — 끝날 때까지 대시보드를 띄우지 않는다(메인 프로그램 사용 불가)
+        var firstRun = Views.DbManage.FirstRunWindow.RunIfNeeded();
         main.Show();
-        _ = Views.DbManage.ShareInfoWindow.ShowIfFirstRunAsync(main);   // 이 PC에서 처음이면 공유를 켜고 공유 정보 알림
+        if (firstRun is not null) Views.DbManage.ShareInfoWindow.ShowResult(main, firstRun);   // 결과·백업 설정 알림
     }
 
     /// <summary>프로그램 다시 시작(DB 복구 후) — 새 프로세스를 띄우고 지금 것은 끝낸다. 환경변수(NEOSYS_DB 등)는 그대로 넘어간다.</summary>
